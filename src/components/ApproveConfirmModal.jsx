@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import ReplyTargetContext from './ReplyTargetContext'
 
 const MONO_FONT = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
 const SANS_FONT = "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
@@ -9,6 +10,7 @@ const CHANNEL_COLORS = {
   personal_linkedin: '#0A66C2',
   anymal_x: '#ffffff',
   personal_x: '#ffffff',
+  facebook_reply: '#1877F2',
 }
 
 const CHANNEL_LABELS = {
@@ -17,6 +19,7 @@ const CHANNEL_LABELS = {
   personal_linkedin: 'Personal LinkedIn',
   anymal_x: 'Anymal X',
   personal_x: 'Personal X',
+  facebook_reply: 'Facebook Reply',
 }
 
 const CHANNEL_DESTINATION_NAME = {
@@ -25,6 +28,7 @@ const CHANNEL_DESTINATION_NAME = {
   personal_linkedin: 'LinkedIn',
   anymal_x: 'X',
   personal_x: 'X',
+  facebook_reply: 'Facebook',
 }
 
 const URL_PATTERN = /https?:\/\/world\.anymalos\.com\/[^\s)]*/
@@ -230,7 +234,9 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
             Confirm Publish
           </div>
           <div style={{ fontSize: '12px', color: 'rgba(255,255,255,0.55)', marginTop: '6px', lineHeight: 1.5 }}>
-            This post will go live immediately on {channelLabel} and cannot be undone.
+            {channel === 'facebook_reply'
+              ? `This reply will be posted immediately on ${destName} and cannot be undone.`
+              : `This post will go live immediately on ${channelLabel} and cannot be undone.`}
           </div>
         </div>
 
@@ -253,6 +259,12 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
             {channelLabel}
           </span>
         </div>
+
+        {channel === 'facebook_reply' && (
+          <div style={{ marginBottom: '18px' }}>
+            <ReplyTargetContext campaign={campaign} expanded={true} />
+          </div>
+        )}
 
         <div style={{ marginBottom: '18px' }}>
           <div
