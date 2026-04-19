@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { MARKETING_API, headers } from '../config'
 import ApproveConfirmModal from '../components/ApproveConfirmModal'
+import ReplyTargetContext from '../components/ReplyTargetContext'
 
 const REFRESH_INTERVAL = 60
 const CHANNELS = [
@@ -18,6 +19,7 @@ const CHANNEL_COLORS = {
   personal_linkedin: '#0A66C2',
   anymal_x: '#000000',
   personal_x: '#657786',
+  facebook_reply: '#1877F2',
 }
 
 const MONO_FONT = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
@@ -420,6 +422,10 @@ function CampaignCard({ campaign, onRequestApprove, onReject, onPatched, actionL
         </div>
       </div>
 
+      {campaign.channel === 'facebook_reply' && (
+        <ReplyTargetContext campaign={campaign} expanded={false} />
+      )}
+
       {!editing && (
         <div style={{ background: '#031808', border: '1px solid #0a2a1a', borderRadius: '4px', padding: '12px', marginBottom: '12px', fontSize: '13px', color: '#c0e0c0', lineHeight: 1.6, whiteSpace: 'pre-wrap', fontFamily: MONO_FONT }}>
           {campaign.message || campaign.generated_copy}
@@ -464,6 +470,7 @@ const VIEW_LABELS = {
   personal_linkedin: 'View on LinkedIn',
   anymal_x: 'View on X',
   personal_x: 'View on X',
+  facebook_reply: 'View reply',
 }
 
 function formatPostedTimestamp(iso) {
@@ -539,6 +546,10 @@ function PublishedCard({ campaign, expanded, onToggleExpanded }) {
           <span style={{ fontSize: '10px', color: '#4a7a5a' }}>{campaign.topic_angle}</span>
         )}
       </div>
+
+      {campaign.channel === 'facebook_reply' && (
+        <ReplyTargetContext campaign={campaign} expanded={false} />
+      )}
 
       <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
         {hasImage && (
