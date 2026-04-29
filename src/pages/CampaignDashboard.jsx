@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { MARKETING_API, headers } from '../config'
+import { MARKETING_API, headers, adminHeaders, HAS_MARKETING_ADMIN_KEY } from '../config'
 import ApproveConfirmModal from '../components/ApproveConfirmModal'
 import ReplyTargetContext from '../components/ReplyTargetContext'
 
@@ -27,6 +27,20 @@ const SANS_FONT = "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024
 
 const URL_PATTERN = /https?:\/\/world\.anymalos\.com\/[^\s)]*/
+const DEFAULT_CANARY_ZIP = '74501'
+
+const EMPTY_TARGET_GROUP = {
+  group_name: '',
+  group_url: '',
+  public_private: 'unknown',
+  member_count: '',
+  member_count_band: 'unknown',
+  group_focus: '',
+  post_text: '',
+  utm_content: '',
+  utm_url: '',
+  remove_link_preview: true,
+}
 
 function findAnymalUrl(message) {
   if (!message) return null
@@ -84,6 +98,60 @@ function rebuildMessageURL(message, { destination, utmCampaign }) {
   }
 
   return message.replace(raw, url.toString())
+}
+
+function extractZipFromCampaign(campaign) {
+  if (campaign?.zip) return String(campaign.zip).padStart(5, '0')
+  const raw = findAnymalUrl(campaign?.message || campaign?.generated_copy || '')
+  if (!raw) return ''
+  try {
+    const u = new URL(raw)
+    const zip = u.searchParams.get('zip')
+    return zip ? String(zip).padStart(5, '0') : ''
+  } catch {
+    return ''
+  }
+}
+
+function postedUrlForCampaign(campaign) {
+  return campaign?.posted_url || campaign?.facebook_post_url || campaign?.post_url || ''
+}
+
+function slugForUtm(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60)
+}
+
+function makeUtmContent(zip, groupName) {
+  const slug = slugForUtm(groupName)
+  return `${zip || DEFAULT_CANARY_ZIP}_${slug || 'group'}`
+}
+
+function buildGroupUtmUrl(zip, utmContent) {
+  const params = new URLSearchParams({
+    utm_source: 'facebook',
+    utm_medium: 'group_post',
+    utm_campaign: `zip_${zip}_local_price`,
+    utm_content: utmContent,
+  })
+  return `https://world.anymalos.com/price?zip=${zip}&${params.toString()}`
+}
+
+function canApproveCampaign(campaign) {
+  return !(campaign.manual_only || campaign.should_approve_in_dashboard === false)
+}
+
+async function readErrorDetail(res) {
+  let detail = `${res.status}`
+  try {
+    const body = await res.json()
+    if (typeof body?.detail === 'string') detail = body.detail
+    else if (body?.detail) detail = JSON.stringify(body.detail)
+  } catch { /* no-op */ }
+  return detail
 }
 
 async function handleImageFile(file) {
@@ -373,7 +441,15 @@ function InlineEditor({ campaign, onSaved, onCancel }) {
   )
 }
 
-function CampaignCard({ campaign, onRequestApprove, onReject, onPatched, actionLoading }) {
+function CampaignCard({
+  campaign,
+  onRequestApprove,
+  onReject,
+  onPatched,
+  onCopyManual,
+  onIncludeInCanary,
+  actionLoading,
+}) {
   const [editing, setEditing] = useState(false)
 
   const firstLine = campaign.generated_copy
@@ -383,6 +459,7 @@ function CampaignCard({ campaign, onRequestApprove, onReject, onPatched, actionL
   const displayTitle = firstLine.length > 100 ? firstLine.slice(0, 100) + '...' : firstLine
   const channelColor = CHANNEL_COLORS[campaign.channel] || '#00e676'
   const isLoading = actionLoading === campaign.campaign_id
+  const isManualOnly = !canApproveCampaign(campaign)
 
   const handleSaved = (patch) => {
     onPatched(campaign.campaign_id, patch)
@@ -432,19 +509,36 @@ function CampaignCard({ campaign, onRequestApprove, onReject, onPatched, actionL
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: '8px' }}>
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
         <button
           onClick={() => setEditing(v => !v)}
           disabled={isLoading}
           style={{ padding: '8px 20px', background: editing ? '#0a2a1a' : 'transparent', color: '#00e676', border: '1px solid #00e676', borderRadius: '4px', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', cursor: isLoading ? 'not-allowed' : 'pointer', fontFamily: SANS_FONT }}>
           {editing ? 'Close' : 'Edit'}
         </button>
-        <button
-          onClick={() => onRequestApprove(campaign)}
-          disabled={isLoading || editing}
-          style={{ padding: '8px 20px', background: (isLoading || editing) ? '#1a3a2a' : '#00e676', color: '#021a0e', border: 'none', borderRadius: '4px', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', cursor: (isLoading || editing) ? 'not-allowed' : 'pointer', fontFamily: SANS_FONT, fontWeight: '600' }}>
-          {isLoading ? 'Publishing...' : 'Approve'}
-        </button>
+        {isManualOnly ? (
+          <>
+            <button
+              onClick={() => onCopyManual(campaign)}
+              disabled={isLoading || editing}
+              style={{ padding: '8px 20px', background: 'transparent', color: '#00e676', border: '1px solid #00e676', borderRadius: '4px', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', cursor: (isLoading || editing) ? 'not-allowed' : 'pointer', fontFamily: SANS_FONT }}>
+              Copy
+            </button>
+            <button
+              onClick={() => onIncludeInCanary(campaign)}
+              disabled={isLoading || editing}
+              style={{ padding: '8px 20px', background: (isLoading || editing) ? '#1a3a2a' : '#00e676', color: '#021a0e', border: 'none', borderRadius: '4px', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', cursor: (isLoading || editing) ? 'not-allowed' : 'pointer', fontFamily: SANS_FONT, fontWeight: '600' }}>
+              Include in Canary Job
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => onRequestApprove(campaign)}
+            disabled={isLoading || editing}
+            style={{ padding: '8px 20px', background: (isLoading || editing) ? '#1a3a2a' : '#00e676', color: '#021a0e', border: 'none', borderRadius: '4px', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', cursor: (isLoading || editing) ? 'not-allowed' : 'pointer', fontFamily: SANS_FONT, fontWeight: '600' }}>
+            {isLoading ? 'Publishing...' : 'Approve'}
+          </button>
+        )}
         <button
           onClick={() => onReject(campaign.campaign_id)}
           disabled={isLoading || editing}
@@ -633,20 +727,344 @@ function PublishedCard({ campaign, expanded, onToggleExpanded }) {
   )
 }
 
+function pillStyle(color = '#00e676') {
+  return {
+    fontSize: '10px',
+    padding: '2px 8px',
+    borderRadius: '10px',
+    background: '#0a2a1a',
+    color,
+    border: `1px solid ${color}`,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+  }
+}
+
+function smallButtonStyle({ filled = false, danger = false, disabled = false } = {}) {
+  const color = danger ? '#ff4444' : '#00e676'
+  return {
+    padding: '7px 12px',
+    background: filled && !disabled ? color : 'transparent',
+    color: filled && !disabled ? '#021a0e' : color,
+    border: filled && !disabled ? 'none' : `1px solid ${disabled ? '#1a3a2a' : color}`,
+    borderRadius: '4px',
+    fontSize: '10px',
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontFamily: SANS_FONT,
+    fontWeight: filled ? 600 : 400,
+    opacity: disabled ? 0.55 : 1,
+  }
+}
+
+function fieldStyle() {
+  return {
+    width: '100%',
+    background: '#031808',
+    border: '1px solid #1a3a2a',
+    borderRadius: '4px',
+    padding: '8px 10px',
+    color: '#e0ffe0',
+    fontFamily: MONO_FONT,
+    fontSize: '12px',
+    outline: 'none',
+  }
+}
+
+function fieldLabel(label) {
+  return (
+    <div style={{ fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#4a7a5a', marginBottom: '6px', fontFamily: SANS_FONT }}>
+      {label}
+    </div>
+  )
+}
+
+function statusColor(status) {
+  if (['completed', 'submitted_visible_or_feed'].includes(status)) return '#00e676'
+  if (['completed_with_failures', 'submitted_unverified', 'pending_admin_approval', 'running', 'approved_for_execution'].includes(status)) return '#ffd54f'
+  if (['failed', 'filtered_or_rejected', 'blocked_join_required', 'blocked_permission', 'cancelled_by_operator', 'timed_out'].includes(status)) return '#ff4444'
+  return '#4a7a5a'
+}
+
+function LaunchZipCanaryPanel({
+  zipOptions,
+  canaryZip,
+  setCanaryZip,
+  pageAnchors,
+  selectedAnchorId,
+  setSelectedAnchorId,
+  selectedAnchor,
+  targetGroups,
+  onTargetGroupChange,
+  onAddTargetGroup,
+  onRemoveTargetGroup,
+  onGenerateGroupCopy,
+  onCreateJob,
+  copyLoading,
+  canaryCreating,
+  canaryJobs,
+  canaryLoading,
+  onCancelJob,
+  onResetJob,
+  onMarkReviewed,
+  canarySourceCampaign,
+}) {
+  const selectedAnchorUrl = postedUrlForCampaign(selectedAnchor)
+  const anchorState = !selectedAnchor
+    ? 'not published'
+    : selectedAnchorUrl
+      ? 'published'
+      : 'missing URL'
+  const anchorReady = anchorState === 'published'
+  const readyGroups = targetGroups.filter(g => g.group_name && g.group_url && g.post_text && (g.utm_url ? g.post_text.includes(g.utm_url) : true))
+  const createDisabled = !HAS_MARKETING_ADMIN_KEY || !anchorReady || readyGroups.length === 0 || canaryCreating
+
+  return (
+    <div style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '16px', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#00e676', margin: '0 0 6px 0' }}>
+            Launch ZIP Canary
+          </h2>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={pillStyle(statusColor(anchorState))}>Page anchor: {anchorState}</span>
+            {canarySourceCampaign && (
+              <span style={pillStyle('#4a7a5a')}>Source: {canarySourceCampaign.campaign_id}</span>
+            )}
+            {!HAS_MARKETING_ADMIN_KEY && (
+              <span style={pillStyle('#ff4444')}>Admin key missing</span>
+            )}
+          </div>
+        </div>
+        <button type="button" onClick={onCreateJob} disabled={createDisabled} style={smallButtonStyle({ filled: true, disabled: createDisabled })}>
+          {canaryCreating ? 'Creating...' : 'Approve for Codex execution'}
+        </button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+        <div>
+          {fieldLabel('ZIP campaign package')}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <select value={canaryZip} onChange={(e) => setCanaryZip(e.target.value)} style={fieldStyle()}>
+              {zipOptions.map(zip => <option key={zip} value={zip}>{zip}</option>)}
+            </select>
+            <input value={canaryZip} onChange={(e) => setCanaryZip(e.target.value.replace(/\D/g, '').slice(0, 5))} style={{ ...fieldStyle(), width: '90px' }} />
+          </div>
+        </div>
+        <div>
+          {fieldLabel('Page anchor')}
+          <select value={selectedAnchorId} onChange={(e) => setSelectedAnchorId(e.target.value)} style={fieldStyle()}>
+            <option value="">No published Page anchor found</option>
+            {pageAnchors.map(c => (
+              <option key={c.campaign_id} value={c.campaign_id}>
+                {c.campaign_id} {postedUrlForCampaign(c) ? '' : '(missing URL)'}
+              </option>
+            ))}
+          </select>
+          {selectedAnchorUrl && (
+            <a href={selectedAnchorUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', marginTop: '6px', color: '#1877F2', fontSize: '11px', fontFamily: MONO_FONT, textDecoration: 'none' }}>
+              {selectedAnchorUrl}
+            </a>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '10px' }}>
+        <h3 style={{ fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#00e676', margin: 0 }}>
+          Target groups ({targetGroups.length})
+        </h3>
+        <button type="button" onClick={onAddTargetGroup} style={smallButtonStyle()}>
+          Add group
+        </button>
+      </div>
+
+      {targetGroups.map((group, index) => {
+        const loading = copyLoading === index
+        return (
+          <div key={index} style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '12px', marginBottom: '10px', background: '#021a0e' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', marginBottom: '10px' }}>
+              <div>
+                {fieldLabel('Group name')}
+                <input value={group.group_name} onChange={(e) => onTargetGroupChange(index, 'group_name', e.target.value)} style={fieldStyle()} />
+              </div>
+              <div>
+                {fieldLabel('Group URL')}
+                <input value={group.group_url} onChange={(e) => onTargetGroupChange(index, 'group_url', e.target.value)} style={fieldStyle()} />
+              </div>
+              <div>
+                {fieldLabel('Privacy')}
+                <select value={group.public_private} onChange={(e) => onTargetGroupChange(index, 'public_private', e.target.value)} style={fieldStyle()}>
+                  <option value="unknown">unknown</option>
+                  <option value="public">public</option>
+                  <option value="private">private</option>
+                </select>
+              </div>
+              <div>
+                {fieldLabel('Members')}
+                <input value={group.member_count} onChange={(e) => onTargetGroupChange(index, 'member_count', e.target.value)} style={fieldStyle()} />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginBottom: '10px' }}>
+              <div>
+                {fieldLabel('Group focus')}
+                <input value={group.group_focus} onChange={(e) => onTargetGroupChange(index, 'group_focus', e.target.value)} style={fieldStyle()} />
+              </div>
+              <div>
+                {fieldLabel('Member band')}
+                <select value={group.member_count_band} onChange={(e) => onTargetGroupChange(index, 'member_count_band', e.target.value)} style={fieldStyle()}>
+                  <option value="unknown">unknown</option>
+                  <option value="under_1k">under 1k</option>
+                  <option value="1k_to_10k">1k to 10k</option>
+                  <option value="10k_plus">10k plus</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '10px' }}>
+              <div>
+                {fieldLabel('UTM content')}
+                <input value={group.utm_content} onChange={(e) => onTargetGroupChange(index, 'utm_content', e.target.value)} style={fieldStyle()} />
+              </div>
+              <div>
+                {fieldLabel('UTM URL')}
+                <input value={group.utm_url} onChange={(e) => onTargetGroupChange(index, 'utm_url', e.target.value)} style={fieldStyle()} />
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '10px' }}>
+              {fieldLabel('Approved group post text')}
+              <textarea value={group.post_text} onChange={(e) => onTargetGroupChange(index, 'post_text', e.target.value)} rows={5} style={{ ...fieldStyle(), resize: 'vertical', lineHeight: 1.5 }} />
+            </div>
+
+            {group.risk_notes?.length > 0 && (
+              <div style={{ color: '#ffd54f', fontSize: '11px', marginBottom: '10px' }}>
+                {group.risk_notes.join(' | ')}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button type="button" onClick={() => onGenerateGroupCopy(index)} disabled={loading || !HAS_MARKETING_ADMIN_KEY} style={smallButtonStyle({ disabled: loading || !HAS_MARKETING_ADMIN_KEY })}>
+                {loading ? 'Generating...' : 'Generate copy'}
+              </button>
+              <button type="button" onClick={() => onRemoveTargetGroup(index)} disabled={targetGroups.length === 1} style={smallButtonStyle({ danger: true, disabled: targetGroups.length === 1 })}>
+                Remove
+              </button>
+              {group.remove_link_preview && <span style={pillStyle('#4a7a5a')}>remove link preview</span>}
+            </div>
+          </div>
+        )
+      })}
+
+      <div style={{ marginTop: '16px' }}>
+        <h3 style={{ fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', color: '#00e676', margin: '0 0 10px 0' }}>
+          Canary jobs {canaryLoading ? '(loading)' : `(${canaryJobs.length})`}
+        </h3>
+        {canaryJobs.length === 0 ? (
+          <p style={{ fontSize: '12px', color: '#4a7a5a', margin: 0 }}>No canary jobs loaded.</p>
+        ) : (
+          canaryJobs.map(job => (
+            <div key={job.job_id} style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '12px', marginBottom: '10px', background: '#031808' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                <div>
+                  <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 600 }}>{job.job_id}</div>
+                  <div style={{ color: '#4a7a5a', fontSize: '11px', marginTop: '2px' }}>
+                    ZIP {job.zip} | {formatDate(job.created_at)}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span style={pillStyle(statusColor(job.status))}>{job.status}{job.is_stale ? ' stale' : ''}</span>
+                  {['approved_for_execution', 'running'].includes(job.status) && (
+                    <button type="button" onClick={() => onCancelJob(job.job_id)} style={smallButtonStyle({ danger: true })}>Cancel</button>
+                  )}
+                  {(job.status === 'timed_out' || job.is_stale) && (
+                    <button type="button" onClick={() => onResetJob(job.job_id)} style={smallButtonStyle()}>Reset</button>
+                  )}
+                </div>
+              </div>
+
+              {(job.target_groups || []).map(group => (
+                <div key={group.group_id} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', padding: '8px 0', borderTop: '1px solid #0a2a1a' }}>
+                  <div>
+                    <div style={{ color: '#c0e0c0', fontSize: '12px' }}>{group.group_name}</div>
+                    <div style={{ color: '#4a7a5a', fontSize: '10px', wordBreak: 'break-all' }}>
+                      {group.group_url}
+                    </div>
+                    {group.notes && <div style={{ color: '#4a7a5a', fontSize: '10px', marginTop: '4px' }}>{group.notes}</div>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <span style={pillStyle(statusColor(group.status))}>{group.status}</span>
+                    {group.status === 'submitted_unverified' && (
+                      <button type="button" onClick={() => onMarkReviewed(job, group)} style={smallButtonStyle()}>Reviewed</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function CampaignDashboard() {
   const [pending, setPending] = useState([])
   const [published, setPublished] = useState([])
+  const [canaryJobs, setCanaryJobs] = useState([])
   const [activeChannel, setActiveChannel] = useState('all')
+  const [canaryZip, setCanaryZip] = useState(DEFAULT_CANARY_ZIP)
+  const [selectedAnchorId, setSelectedAnchorId] = useState('')
+  const [targetGroups, setTargetGroups] = useState([{ ...EMPTY_TARGET_GROUP }])
+  const [canarySourceCampaign, setCanarySourceCampaign] = useState(null)
   const [lastRefresh, setLastRefresh] = useState(null)
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL)
   const [actionLoading, setActionLoading] = useState(null)
   const [actionSuccess, setActionSuccess] = useState(null)
   const [actionError, setActionError] = useState(null)
   const [generating, setGenerating] = useState(false)
+  const [canaryLoading, setCanaryLoading] = useState(false)
+  const [canaryCreating, setCanaryCreating] = useState(false)
+  const [copyLoading, setCopyLoading] = useState(null)
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [confirmLoading, setConfirmLoading] = useState(false)
   const [expandedThumbId, setExpandedThumbId] = useState(null)
   const intervalRef = useRef(null)
+
+  const allCampaigns = useMemo(() => [...pending, ...published], [pending, published])
+  const zipOptions = useMemo(() => {
+    const zips = new Set([DEFAULT_CANARY_ZIP])
+    allCampaigns.forEach(c => {
+      const zip = extractZipFromCampaign(c)
+      if (zip) zips.add(zip)
+    })
+    if (canaryZip) zips.add(canaryZip)
+    return [...zips].sort()
+  }, [allCampaigns, canaryZip])
+
+  const pageAnchors = useMemo(() => (
+    published.filter(c => (
+      extractZipFromCampaign(c) === canaryZip
+      && c.channel === 'facebook_page'
+      && c.status === 'published'
+      && String(c.channel_label || '').toLowerCase().includes('anymal os facebook')
+    ))
+  ), [published, canaryZip])
+
+  const selectedAnchor = useMemo(() => (
+    pageAnchors.find(c => c.campaign_id === selectedAnchorId) || pageAnchors[0] || null
+  ), [pageAnchors, selectedAnchorId])
+
+  useEffect(() => {
+    if (!selectedAnchorId && pageAnchors[0]) {
+      setSelectedAnchorId(pageAnchors[0].campaign_id)
+      return
+    }
+    if (selectedAnchorId && !pageAnchors.some(c => c.campaign_id === selectedAnchorId)) {
+      setSelectedAnchorId(pageAnchors[0]?.campaign_id || '')
+    }
+  }, [pageAnchors, selectedAnchorId])
 
   const fetchData = useCallback(async () => {
     setLastRefresh(new Date())
@@ -661,12 +1079,25 @@ export default function CampaignDashboard() {
       console.error('Failed to fetch pending:', err)
     }
     try {
-      const res2 = await fetch(`${MARKETING_API}/campaigns?status=published&limit=10`, { headers })
+      const res2 = await fetch(`${MARKETING_API}/campaigns?status=published&limit=50`, { headers })
       if (!res2.ok) throw new Error(`${res2.status}`)
       const json2 = await res2.json()
       setPublished(json2.campaigns || [])
     } catch (err) {
       console.error('Failed to fetch published:', err)
+    }
+    if (HAS_MARKETING_ADMIN_KEY) {
+      setCanaryLoading(true)
+      try {
+        const res3 = await fetch(`${MARKETING_API}/campaigns/zip-canary/jobs?limit=20`, { headers: adminHeaders })
+        if (!res3.ok) throw new Error(`${res3.status}`)
+        const json3 = await res3.json()
+        setCanaryJobs(json3.jobs || [])
+      } catch (err) {
+        console.error('Failed to fetch canary jobs:', err)
+      } finally {
+        setCanaryLoading(false)
+      }
     }
   }, [activeChannel])
 
@@ -759,6 +1190,253 @@ export default function CampaignDashboard() {
     setGenerating(false)
   }
 
+  const handleTargetGroupChange = (index, field, value) => {
+    setTargetGroups(groups => groups.map((group, i) => {
+      if (i !== index) return group
+      const next = { ...group, [field]: value }
+      if (field === 'group_name' && !group.utm_content) {
+        const content = makeUtmContent(canaryZip, value)
+        next.utm_content = content
+        next.utm_url = buildGroupUtmUrl(canaryZip, content)
+      }
+      if (field === 'utm_content') {
+        next.utm_url = value ? buildGroupUtmUrl(canaryZip, value) : ''
+      }
+      return next
+    }))
+  }
+
+  const handleAddTargetGroup = () => {
+    setTargetGroups(groups => [...groups, { ...EMPTY_TARGET_GROUP }])
+  }
+
+  const handleRemoveTargetGroup = (index) => {
+    setTargetGroups(groups => groups.length <= 1 ? groups : groups.filter((_, i) => i !== index))
+  }
+
+  const handleGenerateGroupCopy = async (index) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Canary copy generation requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    const group = targetGroups[index]
+    const groupName = group.group_name.trim()
+    if (!groupName) {
+      setActionError('Group name is required before generating copy.')
+      return
+    }
+    const utmContent = group.utm_content || makeUtmContent(canaryZip, groupName)
+    setCopyLoading(index)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/campaigns/zip-local/group-copy`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          zip: canaryZip,
+          group_name: groupName,
+          group_focus: group.group_focus || undefined,
+          member_count_band: group.member_count_band || undefined,
+          utm_content: utmContent,
+        }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const body = await res.json()
+      setTargetGroups(groups => groups.map((item, i) => (
+        i === index
+          ? {
+              ...item,
+              post_text: body.post_text || '',
+              utm_url: body.utm_url || buildGroupUtmUrl(canaryZip, utmContent),
+              utm_content: body.utm_content || utmContent,
+              risk_notes: body.risk_notes || [],
+              remove_link_preview: true,
+            }
+          : item
+      )))
+      setActionSuccess(`Generated group copy: ${groupName}`)
+      setTimeout(() => setActionSuccess(null), 4000)
+    } catch (err) {
+      setActionError(`Group copy failed: ${err.message}`)
+    } finally {
+      setCopyLoading(null)
+    }
+  }
+
+  const buildTargetGroupPayloads = () => targetGroups
+    .map(group => {
+      const groupName = group.group_name.trim()
+      if (!groupName || !group.group_url.trim() || !group.post_text.trim()) return null
+      const utmContent = group.utm_content || makeUtmContent(canaryZip, groupName)
+      const utmUrl = group.utm_url || buildGroupUtmUrl(canaryZip, utmContent)
+      return {
+        group_name: groupName,
+        group_url: group.group_url.trim(),
+        public_private: group.public_private || 'unknown',
+        member_count: group.member_count || null,
+        member_count_band: group.member_count_band || 'unknown',
+        group_focus: group.group_focus || null,
+        post_text: group.post_text.trim(),
+        utm_content: utmContent,
+        utm_url: utmUrl,
+        remove_link_preview: true,
+      }
+    })
+    .filter(Boolean)
+
+  const handleCreateCanaryJob = async () => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Canary job creation requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    if (!selectedAnchor) {
+      setActionError('Publish the Anymal OS Facebook Page anchor before creating the canary job.')
+      return
+    }
+    const anchorUrl = postedUrlForCampaign(selectedAnchor)
+    if (!anchorUrl) {
+      setActionError('Selected Page anchor is missing a Facebook post URL.')
+      return
+    }
+    const targetPayloads = buildTargetGroupPayloads()
+    if (targetPayloads.length === 0) {
+      setActionError('At least one target group needs a URL and approved post text.')
+      return
+    }
+    setCanaryCreating(true)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/campaigns/zip-canary/jobs`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          zip: canaryZip,
+          city: selectedAnchor.city || '',
+          state: selectedAnchor.state || '',
+          county: selectedAnchor.county || '',
+          campaign_goal: 'zip_subscription',
+          status: 'approved_for_execution',
+          page_anchor: {
+            campaign_id: selectedAnchor.campaign_id,
+            facebook_post_url: anchorUrl,
+            status: 'published',
+          },
+          target_groups: targetPayloads,
+          cooldown_seconds_between_posts: 120,
+        }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const job = await res.json()
+      setActionSuccess(`Canary job approved: ${job.job_id}`)
+      setTimeout(() => setActionSuccess(null), 5000)
+      setTargetGroups([{ ...EMPTY_TARGET_GROUP }])
+      setCanarySourceCampaign(null)
+      await fetchData()
+    } catch (err) {
+      setActionError(`Canary job failed: ${err.message}`)
+    } finally {
+      setCanaryCreating(false)
+    }
+  }
+
+  const handleCancelCanaryJob = async (jobId) => {
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/campaigns/zip-canary/jobs/${jobId}/cancel`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({ cancelled_by: 'carlos' }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      setActionSuccess(`Cancelled: ${jobId}`)
+      setTimeout(() => setActionSuccess(null), 4000)
+      await fetchData()
+    } catch (err) {
+      setActionError(`Cancel failed: ${err.message}`)
+    }
+  }
+
+  const handleResetCanaryJob = async (jobId) => {
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/campaigns/zip-canary/jobs/${jobId}/reset`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({ reset_by: 'carlos' }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      setActionSuccess(`Reset: ${jobId}`)
+      setTimeout(() => setActionSuccess(null), 4000)
+      await fetchData()
+    } catch (err) {
+      setActionError(`Reset failed: ${err.message}`)
+    }
+  }
+
+  const handleMarkReviewed = async (job, group) => {
+    setActionError(null)
+    try {
+      const reviewedAt = new Date().toISOString()
+      const res = await fetch(`${MARKETING_API}/campaigns/zip-canary/jobs/${job.job_id}/group-result`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          group_id: group.group_id,
+          status: 'submitted_unverified',
+          posted_as: group.posted_as || 'Carlos Herrera',
+          posted_at: group.posted_at || reviewedAt,
+          observed_text_excerpt: group.observed_text_excerpt || '',
+          facebook_post_url: group.facebook_post_url || null,
+          notes: `${group.notes || ''}${group.notes ? ' | ' : ''}Reviewed in dashboard at ${reviewedAt}`,
+        }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      setActionSuccess(`Reviewed: ${group.group_name}`)
+      setTimeout(() => setActionSuccess(null), 4000)
+      await fetchData()
+    } catch (err) {
+      setActionError(`Review marker failed: ${err.message}`)
+    }
+  }
+
+  const handleCopyManual = async (campaign) => {
+    const text = campaign.message || campaign.generated_copy || ''
+    try {
+      await navigator.clipboard.writeText(text)
+      setActionSuccess(`Copied: ${campaign.campaign_id}`)
+      setTimeout(() => setActionSuccess(null), 4000)
+    } catch (err) {
+      setActionError(`Copy failed: ${err.message}`)
+    }
+  }
+
+  const handleIncludeInCanary = (campaign) => {
+    const text = campaign.message || campaign.generated_copy || ''
+    const zip = extractZipFromCampaign(campaign) || canaryZip
+    const rawUrl = findAnymalUrl(text)
+    let utmContent = ''
+    if (rawUrl) {
+      try {
+        utmContent = new URL(rawUrl).searchParams.get('utm_content') || ''
+      } catch { /* no-op */ }
+    }
+    setCanaryZip(zip)
+    setCanarySourceCampaign(campaign)
+    setTargetGroups(groups => {
+      const next = groups.length ? [...groups] : [{ ...EMPTY_TARGET_GROUP }]
+      next[0] = {
+        ...next[0],
+        post_text: text,
+        utm_content: next[0].utm_content || utmContent,
+        utm_url: next[0].utm_url || rawUrl || '',
+        remove_link_preview: true,
+      }
+      return next
+    })
+    setActionSuccess(`Included in canary builder: ${campaign.campaign_id}`)
+    setTimeout(() => setActionSuccess(null), 4000)
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
@@ -783,6 +1461,30 @@ export default function CampaignDashboard() {
       {actionSuccess && <div style={{ background: '#0a2a1a', border: '1px solid #00e676', borderRadius: '4px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#00e676' }}>{actionSuccess}</div>}
       {actionError && <div style={{ background: '#2a0a0a', border: '1px solid #ff4444', borderRadius: '4px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#ff4444' }}>{actionError}</div>}
 
+      <LaunchZipCanaryPanel
+        zipOptions={zipOptions}
+        canaryZip={canaryZip}
+        setCanaryZip={setCanaryZip}
+        pageAnchors={pageAnchors}
+        selectedAnchorId={selectedAnchorId}
+        setSelectedAnchorId={setSelectedAnchorId}
+        selectedAnchor={selectedAnchor}
+        targetGroups={targetGroups}
+        onTargetGroupChange={handleTargetGroupChange}
+        onAddTargetGroup={handleAddTargetGroup}
+        onRemoveTargetGroup={handleRemoveTargetGroup}
+        onGenerateGroupCopy={handleGenerateGroupCopy}
+        onCreateJob={handleCreateCanaryJob}
+        copyLoading={copyLoading}
+        canaryCreating={canaryCreating}
+        canaryJobs={canaryJobs}
+        canaryLoading={canaryLoading}
+        onCancelJob={handleCancelCanaryJob}
+        onResetJob={handleResetCanaryJob}
+        onMarkReviewed={handleMarkReviewed}
+        canarySourceCampaign={canarySourceCampaign}
+      />
+
       <div style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '16px', marginBottom: '20px' }}>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
           {CHANNELS.map(ch => (
@@ -806,6 +1508,8 @@ export default function CampaignDashboard() {
               onRequestApprove={handleRequestApprove}
               onReject={handleReject}
               onPatched={handlePatched}
+              onCopyManual={handleCopyManual}
+              onIncludeInCanary={handleIncludeInCanary}
               actionLoading={actionLoading}
             />
           ))
