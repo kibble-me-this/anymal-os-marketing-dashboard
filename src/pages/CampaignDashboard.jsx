@@ -28,6 +28,7 @@ const MAX_IMAGE_BYTES = 4 * 1024 * 1024
 
 const URL_PATTERN = /https?:\/\/world\.anymalos\.com\/[^\s)]*/
 const DEFAULT_CANARY_ZIP = '74501'
+const CREATIVE_TEMPLATE_ID = 'city_price_launch_v1'
 
 const EMPTY_TARGET_GROUP = {
   group_name: '',
@@ -152,6 +153,20 @@ async function readErrorDetail(res) {
     else if (body?.detail) detail = JSON.stringify(body.detail)
   } catch { /* no-op */ }
   return detail
+}
+
+async function readApiError(res) {
+  try {
+    const body = await res.json()
+    const detail = body?.detail || body
+    if (typeof detail === 'string') return { message: detail, detail: { error: detail } }
+    return {
+      message: detail?.error || detail?.message || `${res.status}`,
+      detail,
+    }
+  } catch {
+    return { message: `${res.status}`, detail: { error: `${res.status}` } }
+  }
 }
 
 async function handleImageFile(file) {
@@ -449,6 +464,7 @@ function CampaignCard({
   onCopyManual,
   onIncludeInCanary,
   actionLoading,
+  embedded = false,
 }) {
   const [editing, setEditing] = useState(false)
 
@@ -467,7 +483,14 @@ function CampaignCard({
   }
 
   return (
-    <div style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '16px', marginBottom: '12px', background: '#021a0e' }}>
+    <div style={{
+      border: embedded ? 'none' : '1px solid #1a3a2a',
+      borderTop: embedded ? '1px solid #0a2a1a' : '1px solid #1a3a2a',
+      borderRadius: embedded ? 0 : '6px',
+      padding: embedded ? '14px 0 0 0' : '16px',
+      marginBottom: embedded ? '14px' : '12px',
+      background: embedded ? 'transparent' : '#021a0e',
+    }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '8px' }}>
         <div style={{ flex: 1 }}>
           <p style={{ fontWeight: '500', fontSize: '14px', color: '#e0ffe0', margin: '0 0 4px 0', lineHeight: 1.4 }}>{displayTitle}</p>
@@ -740,6 +763,119 @@ function pillStyle(color = '#00e676') {
   }
 }
 
+function statusPillFor(value, { compact = false } = {}) {
+  const normalized = String(value || 'unknown')
+  const labels = {
+    needs_review_stale_anchor: 'Stale Anchor',
+    needs_creative_review: 'Creative Review Needed',
+    shipped: 'Generated',
+    generated: 'Generated',
+    creative_current: 'Creative Current',
+    creative_missing: 'Creative Missing',
+    creative_stale_brand_version: 'Creative Stale',
+    generating: 'Generating',
+    regenerating: 'Regenerating',
+    refreshing_drafts: 'Refreshing Drafts',
+    failed: 'Failed',
+    unknown: 'Unknown',
+  }
+  const colors = {
+    needs_review_stale_anchor: '#ff4444',
+    failed: '#ff4444',
+    needs_creative_review: '#ffd54f',
+    creative_missing: '#ffd54f',
+    creative_stale_brand_version: '#ffd54f',
+    generating: '#4da3ff',
+    regenerating: '#4da3ff',
+    refreshing_drafts: '#4da3ff',
+    shipped: '#00e676',
+    generated: '#00e676',
+    creative_current: '#00e676',
+    unknown: '#4a7a5a',
+  }
+  const label = labels[normalized] || normalized.replaceAll('_', ' ')
+  return <span style={{ ...pillStyle(colors[normalized] || '#4a7a5a'), fontSize: compact ? '9px' : '10px' }}>{label}</span>
+}
+
+function creativeMetadataFromAsset(asset) {
+  if (!asset) return null
+  return {
+    template_id: asset.template_id || CREATIVE_TEMPLATE_ID,
+    creative_status: asset.status === 'generated' ? 'creative_current' : 'failed',
+    current_brand_version: asset.brand_version || '',
+    creative_asset_id: asset.creative_asset_id || asset.doc_id || null,
+    image_url: asset.image_url || null,
+    thumbnail_url: asset.thumbnail_url || null,
+    brand_version: asset.brand_version || null,
+    status: asset.status || null,
+    render_engine: asset.render_engine || null,
+    background_model: asset.background_model || null,
+    brand_version_stale: null,
+  }
+}
+
+function resolveCreativeStatus(creativeMetadata, fallback) {
+  return fallback || creativeMetadata?.creative_status || 'creative_missing'
+}
+
+function resolveZipStatus(campaigns, creativeStatus) {
+  if (campaigns.some(c => c.status === 'needs_review_stale_anchor')) return 'needs_review_stale_anchor'
+  if (campaigns.some(c => c.status === 'needs_creative_review')) return 'needs_creative_review'
+  if (creativeStatus === 'creative_missing' || creativeStatus === 'creative_stale_brand_version') return 'needs_creative_review'
+  return 'shipped'
+}
+
+function campaignCityCounty(campaigns) {
+  const firstWithPlace = campaigns.find(c => c.city || c.county || c.state) || campaigns[0] || {}
+  return {
+    city: firstWithPlace.city || '',
+    county: firstWithPlace.county || '',
+    state: firstWithPlace.state || '',
+  }
+}
+
+function buildZipGroups(campaigns, zipCreativeOverrides = {}) {
+  const map = new Map()
+  campaigns.forEach(campaign => {
+    const zip = extractZipFromCampaign(campaign) || 'other'
+    if (!map.has(zip)) map.set(zip, [])
+    map.get(zip).push(campaign)
+  })
+  return [...map.entries()]
+    .map(([zip, list]) => {
+      const override = zipCreativeOverrides[zip] || {}
+      const place = campaignCityCounty(list)
+      const metadata = override.creativeMetadata || list.find(c => c.creative_metadata)?.creative_metadata || null
+      const creativeStatus = resolveCreativeStatus(metadata, override.creativeStatus || list.find(c => c.creative_status)?.creative_status)
+      const zipStatus = zip === 'other' ? 'unknown' : resolveZipStatus(list, creativeStatus)
+      const hasFacebookDraftWithoutCreative = list.some(c => c.channel === 'facebook_page' && !c.creative_metadata)
+      return {
+        zip,
+        campaigns: list,
+        creativeMetadata: metadata,
+        creativeStatus,
+        zipStatus,
+        hasFacebookDraftWithoutCreative,
+        needsRefresh: Boolean(override.needsRefresh),
+        ...place,
+      }
+    })
+    .sort((a, b) => {
+      if (a.zip === 'other') return 1
+      if (b.zip === 'other') return -1
+      return a.zip.localeCompare(b.zip)
+    })
+}
+
+function mergeCampaigns(...lists) {
+  const map = new Map()
+  lists.flat().filter(Boolean).forEach(campaign => {
+    const id = campaign.campaign_id || campaign.doc_id
+    if (id) map.set(id, campaign)
+  })
+  return [...map.values()].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+}
+
 function smallButtonStyle({ filled = false, danger = false, disabled = false } = {}) {
   const color = danger ? '#ff4444' : '#00e676'
   return {
@@ -1009,6 +1145,179 @@ function LaunchZipCanaryPanel({
   )
 }
 
+function CreativePreviewBlock({
+  zip,
+  creativeMetadata,
+  creativeStatus,
+  zipStatus,
+  isLoading,
+  loadingPhase,
+  onGenerateCreative,
+  onRegenerateCreative,
+  onRefreshDrafts,
+  canRefreshDrafts,
+  disabled,
+  errorDetail,
+}) {
+  const hasCreative = Boolean(creativeMetadata?.thumbnail_url || creativeMetadata?.image_url)
+  const imageUrl = creativeMetadata?.thumbnail_url || creativeMetadata?.image_url || ''
+  const fullUrl = creativeMetadata?.image_url || creativeMetadata?.thumbnail_url || ''
+  const effectiveStatus = isLoading ? loadingPhase : creativeStatus
+  const isStaleAnchor = zipStatus === 'needs_review_stale_anchor' || errorDetail?.error === 'insufficient_fresh_evidence'
+  const isMissing = creativeStatus === 'creative_missing'
+  const isBrandStale = Boolean(creativeMetadata?.brand_version_stale)
+
+  return (
+    <div style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '12px', background: '#031808', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', alignItems: 'start' }}>
+      <div>
+        {hasCreative ? (
+          <a href={fullUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'block' }}>
+            <img
+              src={imageUrl}
+              alt={`Creative preview for ZIP ${zip}`}
+              style={{ width: '100%', aspectRatio: '600 / 315', objectFit: 'cover', border: '1px solid #1a3a2a', borderRadius: '4px', display: 'block' }}
+            />
+          </a>
+        ) : (
+          <div style={{ width: '100%', aspectRatio: '600 / 315', border: '1px dashed #1a3a2a', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4a7a5a', fontSize: '11px', fontFamily: MONO_FONT, textAlign: 'center', padding: '12px' }}>
+            No creative generated yet
+          </div>
+        )}
+      </div>
+
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '8px' }}>
+          {statusPillFor(effectiveStatus)}
+          {isBrandStale && statusPillFor('creative_stale_brand_version')}
+          {creativeMetadata?.status && <span style={pillStyle('#4a7a5a')}>{creativeMetadata.status}</span>}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', marginBottom: '10px', fontSize: '10px', color: '#4a7a5a', fontFamily: MONO_FONT }}>
+          <span>template: {creativeMetadata?.template_id || CREATIVE_TEMPLATE_ID}</span>
+          <span>brand: {creativeMetadata?.brand_version || creativeMetadata?.current_brand_version || 'server sourced'}</span>
+          <span>render: {creativeMetadata?.render_engine || 'N/A'}</span>
+          <span>model: {creativeMetadata?.background_model || 'N/A'}</span>
+        </div>
+
+        {isStaleAnchor && (
+          <div style={{ background: '#2a0a0a', border: '1px solid #ff4444', borderRadius: '4px', padding: '8px 10px', color: '#ffb3b3', fontSize: '11px', lineHeight: 1.45, marginBottom: '10px' }}>
+            Stale market anchor. {errorDetail?.anchor_name ? `${errorDetail.anchor_name} is not fresh enough for generation.` : 'Fresh evidence is required before publishing.'}
+          </div>
+        )}
+
+        {isMissing && !isStaleAnchor && (
+          <div style={{ background: '#2a230a', border: '1px solid #ffd54f', borderRadius: '4px', padding: '8px 10px', color: '#ffe58a', fontSize: '11px', lineHeight: 1.45, marginBottom: '10px' }}>
+            Creative missing. Generate one branded image for this ZIP, then refresh drafts to attach it.
+          </div>
+        )}
+
+        {isBrandStale && (
+          <div style={{ background: '#2a230a', border: '1px solid #ffd54f', borderRadius: '4px', padding: '8px 10px', color: '#ffe58a', fontSize: '11px', lineHeight: 1.45, marginBottom: '10px' }}>
+            Brand version stale: {creativeMetadata.brand_version_stale}. Regenerate before publishing.
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {creativeStatus === 'creative_missing' ? (
+            <button type="button" onClick={onGenerateCreative} disabled={disabled || isLoading || isStaleAnchor} style={smallButtonStyle({ filled: true, disabled: disabled || isLoading || isStaleAnchor })}>
+              {isLoading && loadingPhase === 'generating' ? 'Generating...' : 'Generate Creative'}
+            </button>
+          ) : (
+            <button type="button" onClick={onRegenerateCreative} disabled={disabled || isLoading || isStaleAnchor} style={smallButtonStyle({ disabled: disabled || isLoading || isStaleAnchor })}>
+              {isLoading && loadingPhase === 'regenerating' ? 'Regenerating...' : 'Regenerate Creative'}
+            </button>
+          )}
+          {canRefreshDrafts && (
+            <button type="button" onClick={onRefreshDrafts} disabled={disabled || isLoading || isStaleAnchor} style={smallButtonStyle({ filled: true, disabled: disabled || isLoading || isStaleAnchor })}>
+              {isLoading && loadingPhase === 'refreshing_drafts' ? 'Refreshing...' : 'Refresh Drafts'}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ZipCampaignCard({
+  group,
+  actionLoading,
+  onRequestApprove,
+  onReject,
+  onPatched,
+  onCopyManual,
+  onIncludeInCanary,
+  onGenerateCreative,
+  onRegenerateCreative,
+  onRefreshDrafts,
+  zipLoadingState,
+  zipError,
+}) {
+  const isOther = group.zip === 'other'
+  const loadingPhase = zipLoadingState || 'idle'
+  const isLoading = ['generating', 'regenerating', 'refreshing_drafts'].includes(loadingPhase)
+  const canRefreshDrafts = !isOther && (group.needsRefresh || (group.creativeStatus === 'creative_current' && group.hasFacebookDraftWithoutCreative))
+  const place = [group.city, group.county, group.state].filter(Boolean).join(', ')
+
+  return (
+    <div style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '16px', marginBottom: '14px', background: '#021a0e' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: '12px' }}>
+        <div>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '5px' }}>
+            <h3 style={{ fontSize: '13px', color: '#e0ffe0', margin: 0, fontWeight: 600 }}>
+              {isOther ? 'Other drafts' : `ZIP ${group.zip}`}
+            </h3>
+            {!isOther && statusPillFor(group.zipStatus)}
+            {!isOther && statusPillFor(group.creativeStatus, { compact: true })}
+          </div>
+          <div style={{ color: '#4a7a5a', fontSize: '11px', fontFamily: MONO_FONT }}>
+            {place || (isOther ? 'No ZIP detected' : 'Place metadata not available')} | {group.campaigns.length} draft{group.campaigns.length === 1 ? '' : 's'}
+          </div>
+        </div>
+      </div>
+
+      {!isOther && (
+        <div style={{ marginBottom: '14px' }}>
+          <CreativePreviewBlock
+            zip={group.zip}
+            creativeMetadata={group.creativeMetadata}
+            creativeStatus={group.creativeStatus}
+            zipStatus={group.zipStatus}
+            isLoading={isLoading}
+            loadingPhase={loadingPhase}
+            onGenerateCreative={() => onGenerateCreative(group.zip)}
+            onRegenerateCreative={() => onRegenerateCreative(group.zip)}
+            onRefreshDrafts={() => onRefreshDrafts(group.zip)}
+            canRefreshDrafts={canRefreshDrafts}
+            disabled={!HAS_MARKETING_ADMIN_KEY}
+            errorDetail={zipError}
+          />
+          {group.zipStatus === 'needs_creative_review' && group.campaigns.length > 1 && (
+            <div style={{ color: '#ffd54f', fontSize: '11px', marginTop: '8px' }}>
+              {group.campaigns.length} drafts at this ZIP await creative generation or refresh.
+            </div>
+          )}
+        </div>
+      )}
+
+      <div>
+        {group.campaigns.map(campaign => (
+          <CampaignCard
+            key={campaign.campaign_id}
+            campaign={campaign}
+            onRequestApprove={onRequestApprove}
+            onReject={onReject}
+            onPatched={onPatched}
+            onCopyManual={onCopyManual}
+            onIncludeInCanary={onIncludeInCanary}
+            actionLoading={actionLoading}
+            embedded
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function CampaignDashboard() {
   const [pending, setPending] = useState([])
   const [published, setPublished] = useState([])
@@ -1030,6 +1339,9 @@ export default function CampaignDashboard() {
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [confirmLoading, setConfirmLoading] = useState(false)
   const [expandedThumbId, setExpandedThumbId] = useState(null)
+  const [zipCreativeOverrides, setZipCreativeOverrides] = useState({})
+  const [zipLoading, setZipLoading] = useState({})
+  const [zipErrors, setZipErrors] = useState({})
   const intervalRef = useRef(null)
 
   const allCampaigns = useMemo(() => [...pending, ...published], [pending, published])
@@ -1056,6 +1368,10 @@ export default function CampaignDashboard() {
     pageAnchors.find(c => c.campaign_id === selectedAnchorId) || pageAnchors[0] || null
   ), [pageAnchors, selectedAnchorId])
 
+  const pendingZipGroups = useMemo(() => (
+    buildZipGroups(pending, zipCreativeOverrides)
+  ), [pending, zipCreativeOverrides])
+
   useEffect(() => {
     if (!selectedAnchorId && pageAnchors[0]) {
       setSelectedAnchorId(pageAnchors[0].campaign_id)
@@ -1069,15 +1385,34 @@ export default function CampaignDashboard() {
   const fetchData = useCallback(async () => {
     setLastRefresh(new Date())
     setCountdown(REFRESH_INTERVAL)
+    let pendingDrafts = []
+    let reviewDrafts = []
     try {
       const channelParam = activeChannel !== 'all' ? `?channel=${activeChannel}` : ''
       const res = await fetch(`${MARKETING_API}/campaigns/pending/by-channel${channelParam}`, { headers })
       if (!res.ok) throw new Error(`${res.status}`)
       const json = await res.json()
-      setPending(json.campaigns || [])
+      pendingDrafts = json.campaigns || []
     } catch (err) {
       console.error('Failed to fetch pending:', err)
     }
+    try {
+      const reviewStatuses = ['needs_creative_review', 'needs_review_stale_anchor']
+      const responses = await Promise.all(reviewStatuses.map(status =>
+        fetch(`${MARKETING_API}/campaigns?status=${status}&limit=50`, { headers })
+      ))
+      const bodies = await Promise.all(responses.map(async (res) => {
+        if (!res.ok) throw new Error(`${res.status}`)
+        return res.json()
+      }))
+      reviewDrafts = bodies.flatMap(body => body.campaigns || [])
+      if (activeChannel !== 'all') {
+        reviewDrafts = reviewDrafts.filter(c => c.channel === activeChannel)
+      }
+    } catch (err) {
+      console.error('Failed to fetch review drafts:', err)
+    }
+    setPending(mergeCampaigns(pendingDrafts, reviewDrafts))
     try {
       const res2 = await fetch(`${MARKETING_API}/campaigns?status=published&limit=50`, { headers })
       if (!res2.ok) throw new Error(`${res2.status}`)
@@ -1188,6 +1523,100 @@ export default function CampaignDashboard() {
       setActionError(`Generate failed: ${err.message}`)
     }
     setGenerating(false)
+  }
+
+  const callAdminPost = async (path) => {
+    const res = await fetch(`${MARKETING_API}${path}`, { method: 'POST', headers: adminHeaders })
+    if (!res.ok) {
+      const parsed = await readApiError(res)
+      const err = new Error(parsed.message)
+      err.detail = parsed.detail
+      throw err
+    }
+    return res.json()
+  }
+
+  const setZipLoadingPhase = (zip, phase) => {
+    setZipLoading(map => ({ ...map, [zip]: phase }))
+  }
+
+  const clearZipLoadingPhase = (zip) => {
+    setZipLoading(map => {
+      const next = { ...map }
+      delete next[zip]
+      return next
+    })
+  }
+
+  const handleGenerateCreative = async (zip, { force = false } = {}) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Creative generation requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    const phase = force ? 'regenerating' : 'generating'
+    setZipLoadingPhase(zip, phase)
+    setActionError(null)
+    setZipErrors(errors => {
+      const next = { ...errors }
+      delete next[zip]
+      return next
+    })
+    try {
+      const suffix = force ? '&force_regenerate=true' : ''
+      const asset = await callAdminPost(`/campaigns/creative/generate?zip=${zip}&template_id=${CREATIVE_TEMPLATE_ID}${suffix}`)
+      const creativeMetadata = creativeMetadataFromAsset(asset)
+      setZipCreativeOverrides(map => ({
+        ...map,
+        [zip]: {
+          creativeMetadata,
+          creativeStatus: creativeMetadata?.creative_status || 'creative_current',
+          needsRefresh: true,
+        },
+      }))
+      setActionSuccess(`Creative ready for ZIP ${zip}. Refresh drafts to attach it.`)
+      setTimeout(() => setActionSuccess(null), 5000)
+    } catch (err) {
+      setZipErrors(errors => ({ ...errors, [zip]: err.detail || { error: err.message } }))
+      setActionError(`Creative generation failed for ZIP ${zip}: ${err.message}`)
+    } finally {
+      clearZipLoadingPhase(zip)
+    }
+  }
+
+  const handleRefreshZipDrafts = async (zip) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Draft refresh requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setZipLoadingPhase(zip, 'refreshing_drafts')
+    setActionError(null)
+    try {
+      const body = await callAdminPost(`/campaigns/zip-local/generate?zip=${zip}`)
+      const updatedCount = Array.isArray(body.creative_updated_draft_ids)
+        ? body.creative_updated_draft_ids.length
+        : 0
+      if (body.creative_metadata) {
+        setZipCreativeOverrides(map => ({
+          ...map,
+          [zip]: {
+            creativeMetadata: body.creative_metadata,
+            creativeStatus: body.creative_status || body.creative_metadata.creative_status,
+            needsRefresh: false,
+          },
+        }))
+      }
+      setActionSuccess(updatedCount > 0
+        ? `${updatedCount} drafts updated with creative metadata for ZIP ${zip}.`
+        : `Drafts refreshed for ZIP ${zip}.`
+      )
+      setTimeout(() => setActionSuccess(null), 5000)
+      await fetchData()
+    } catch (err) {
+      setZipErrors(errors => ({ ...errors, [zip]: err.detail || { error: err.message } }))
+      setActionError(`Draft refresh failed for ZIP ${zip}: ${err.message}`)
+    } finally {
+      clearZipLoadingPhase(zip)
+    }
   }
 
   const handleTargetGroupChange = (index, field, value) => {
@@ -1501,16 +1930,21 @@ export default function CampaignDashboard() {
         {pending.length === 0 ? (
           <p style={{ fontSize: '13px', color: '#4a7a5a' }}>No pending drafts. Run Generate Drafts or wait for the 9AM CT auto-run.</p>
         ) : (
-          pending.map(c => (
-            <CampaignCard
-              key={c.campaign_id}
-              campaign={c}
+          pendingZipGroups.map(group => (
+            <ZipCampaignCard
+              key={group.zip}
+              group={group}
               onRequestApprove={handleRequestApprove}
               onReject={handleReject}
               onPatched={handlePatched}
               onCopyManual={handleCopyManual}
               onIncludeInCanary={handleIncludeInCanary}
+              onGenerateCreative={(zip) => handleGenerateCreative(zip)}
+              onRegenerateCreative={(zip) => handleGenerateCreative(zip, { force: true })}
+              onRefreshDrafts={handleRefreshZipDrafts}
               actionLoading={actionLoading}
+              zipLoadingState={zipLoading[group.zip]}
+              zipError={zipErrors[group.zip]}
             />
           ))
         )}
