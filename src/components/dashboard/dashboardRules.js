@@ -30,6 +30,16 @@ export const NEXT_ACTION_RULES = [
     }),
   },
   {
+    id: 'page_anchor_ready_for_group_distribution',
+    priority: 35,
+    when: stats => stats.publishedAnchorsCount > 0 && stats.distributionPlansAwaitingApproval > 0,
+    getMessage: stats => ({
+      title: 'Approve distribution plan for live Page anchors',
+      detail: `${stats.distributionPlansAwaitingApproval} distribution plan${stats.distributionPlansAwaitingApproval > 1 ? 's' : ''} await${stats.distributionPlansAwaitingApproval === 1 ? 's' : ''} operator approval.`,
+      tone: '#00aaff',
+    }),
+  },
+  {
     id: 'canary_job_ready',
     priority: 40,
     when: stats => stats.pageAnchorsCount > 0 && stats.canaryJobsCount === 0,
@@ -81,7 +91,20 @@ function isPublishedToday(campaign) {
   return date.toDateString() === new Date().toDateString()
 }
 
-export function buildOpsStats({ pending, published, canaryJobs, pendingZipGroups }) {
+function distributionPlanNeedsApproval(plan) {
+  return (
+    plan.plan_status === 'composing'
+    || plan.plan_status === 'needs_review'
+    || plan.plan_status === 'partial'
+    || Number(plan.pending_approval_count || 0) > 0
+  )
+}
+
+function distributionPlanReady(plan) {
+  return plan.plan_status === 'approved' || Number(plan.approved_count || 0) > 0
+}
+
+export function buildOpsStats({ pending, published, canaryJobs, pendingZipGroups, distributionPlans = [] }) {
   const zipGroups = pendingZipGroups.filter(group => group.zip !== 'other')
   const staleGroups = zipGroups.filter(group => group.zipStatus === 'needs_review_stale_anchor')
   const missingCreativeGroups = zipGroups.filter(group => (
@@ -104,7 +127,12 @@ export function buildOpsStats({ pending, published, canaryJobs, pendingZipGroups
     missingCreativeZips: missingCreativeGroups.map(group => group.zip),
     fbPageDraftsReady,
     pageAnchorsCount: allPageAnchors.length,
+    publishedAnchorsCount: allPageAnchors.length,
     approvedPageAnchorsCount: allPageAnchors.length,
+    distributionPlansCount: distributionPlans.length,
+    distributionPlansAwaitingApproval: distributionPlans.filter(distributionPlanNeedsApproval).length,
+    distributionPlansReadyForExecution: distributionPlans.filter(distributionPlanReady).length,
+    distributionTargetsNeedsReviewCount: distributionPlans.reduce((total, plan) => total + Number(plan.needs_review_count || 0), 0),
     canaryJobsCount: canaryJobs.length,
     canaryNeedsReviewCount: canaryJobs.filter(canaryJobNeedsReview).length,
     activeCanaryJobsCount: canaryJobs.filter(canaryJobIsActive).length,
