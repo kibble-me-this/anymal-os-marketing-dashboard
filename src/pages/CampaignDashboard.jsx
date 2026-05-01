@@ -7,6 +7,7 @@ import NextBestActionPanel from '../components/dashboard/NextBestActionPanel'
 import DraftReviewWorkspace from '../components/dashboard/DraftReviewWorkspace'
 import CanaryBuilderWorkspace from '../components/dashboard/CanaryBuilderWorkspace'
 import PublishedWorkspace from '../components/dashboard/PublishedWorkspace'
+import DistributionWorkspace from '../components/dashboard/DistributionWorkspace'
 import { buildOpsStats, isAnymalPageAnchor } from '../components/dashboard/dashboardRules'
 
 const REFRESH_INTERVAL = 60
@@ -160,6 +161,7 @@ export default function CampaignDashboard() {
   const [pending, setPending] = useState([])
   const [published, setPublished] = useState([])
   const [canaryJobs, setCanaryJobs] = useState([])
+  const [distributionPlans, setDistributionPlans] = useState([])
   const [activeChannel, setActiveChannel] = useState('all')
   const [workspace, setWorkspace] = useState('drafts')
   const [canaryZip, setCanaryZip] = useState(DEFAULT_CANARY_ZIP)
@@ -174,6 +176,8 @@ export default function CampaignDashboard() {
   const [generating, setGenerating] = useState(false)
   const [canaryLoading, setCanaryLoading] = useState(false)
   const [canaryCreating, setCanaryCreating] = useState(false)
+  const [distributionLoading, setDistributionLoading] = useState(false)
+  const [distributionActionLoading, setDistributionActionLoading] = useState(null)
   const [copyLoading, setCopyLoading] = useState(null)
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [confirmLoading, setConfirmLoading] = useState(false)
@@ -210,7 +214,8 @@ export default function CampaignDashboard() {
     published,
     canaryJobs,
     pendingZipGroups,
-  }), [canaryJobs, pending, pendingZipGroups, published])
+    distributionPlans,
+  }), [canaryJobs, distributionPlans, pending, pendingZipGroups, published])
 
   const workspaceTabs = useMemo(() => ([
     {
@@ -232,13 +237,22 @@ export default function CampaignDashboard() {
       tone: opsStats.canaryNeedsReviewCount ? '#ffd54f' : '#00e676',
     },
     {
+      id: 'distribution',
+      label: 'Distribution',
+      count: distributionPlans.length,
+      detail: opsStats.distributionPlansAwaitingApproval
+        ? `${opsStats.distributionPlansAwaitingApproval} pending`
+        : `${opsStats.distributionPlansReadyForExecution} ready`,
+      tone: opsStats.distributionPlansAwaitingApproval ? '#ffd54f' : '#00e676',
+    },
+    {
       id: 'published',
       label: 'Published',
       count: published.length,
       detail: `${opsStats.publishedTodayCount} today`,
       tone: '#00e676',
     },
-  ]), [canaryJobs.length, opsStats, pending.length, published.length])
+  ]), [canaryJobs.length, distributionPlans.length, opsStats, pending.length, published.length])
 
   useEffect(() => {
     if (!selectedAnchorId && pageAnchors[0]) {
@@ -298,6 +312,17 @@ export default function CampaignDashboard() {
         console.error('Failed to fetch canary jobs:', err)
       } finally {
         setCanaryLoading(false)
+      }
+      setDistributionLoading(true)
+      try {
+        const res4 = await fetch(`${MARKETING_API}/distribution-plans`, { headers: adminHeaders })
+        if (!res4.ok) throw new Error(`${res4.status}`)
+        const json4 = await res4.json()
+        setDistributionPlans(json4.distribution_plans || [])
+      } catch (err) {
+        console.error('Failed to fetch distribution plans:', err)
+      } finally {
+        setDistributionLoading(false)
       }
     }
   }, [activeChannel])
@@ -692,6 +717,136 @@ export default function CampaignDashboard() {
     }
   }
 
+  const replaceDistributionPlan = (updatedPlan) => {
+    setDistributionPlans(plans => {
+      const exists = plans.some(plan => plan.plan_id === updatedPlan.plan_id)
+      const next = exists
+        ? plans.map(plan => plan.plan_id === updatedPlan.plan_id ? updatedPlan : plan)
+        : [updatedPlan, ...plans]
+      return next.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    })
+  }
+
+  const handleComposeDistributionPlan = async (campaign) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Distribution planning requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    const anchorUrl = postedUrlForCampaign(campaign)
+    const pageAnchorPostId = campaign.post_id || campaign.facebook_post_id || ''
+    if (!anchorUrl || !pageAnchorPostId) {
+      setActionError('Selected Page anchor is missing a Facebook post URL or post ID.')
+      return
+    }
+    setDistributionActionLoading(`compose:${campaign.campaign_id}`)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/distribution-plans/compose`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          campaign_id: campaign.campaign_id,
+          page_anchor_post_url: anchorUrl,
+          page_anchor_post_id: pageAnchorPostId,
+        }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const plan = await res.json()
+      replaceDistributionPlan(plan)
+      setWorkspace('distribution')
+      setActionSuccess(`Distribution plan composed: ${plan.plan_id}`)
+      setTimeout(() => setActionSuccess(null), 5000)
+    } catch (err) {
+      setActionError(`Distribution plan failed: ${err.message}`)
+    } finally {
+      setDistributionActionLoading(null)
+    }
+  }
+
+  const handleUpdateDistributionTarget = async (planId, targetIndex, payload) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Distribution approval requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setDistributionActionLoading(`${planId}:${targetIndex}`)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/distribution-plans/${planId}/targets/${targetIndex}`, {
+        method: 'PUT',
+        headers: adminHeaders,
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const plan = await res.json()
+      replaceDistributionPlan(plan)
+      setActionSuccess(`Distribution target updated: ${targetIndex + 1}`)
+      setTimeout(() => setActionSuccess(null), 4000)
+    } catch (err) {
+      setActionError(`Distribution update failed: ${err.message}`)
+      throw err
+    } finally {
+      setDistributionActionLoading(null)
+    }
+  }
+
+  const handleBatchApproveTargets = async (planId, targetIndices) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Batch approval requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setDistributionActionLoading(`${planId}:batch`)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/distribution-plans/${planId}/batch-approve`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({ target_indices: targetIndices }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const plan = await res.json()
+      replaceDistributionPlan(plan)
+      setActionSuccess(`Batch approved ${targetIndices.length} targets`)
+      setTimeout(() => setActionSuccess(null), 4000)
+    } catch (err) {
+      setActionError(`Batch approval failed: ${err.message}`)
+      throw err
+    } finally {
+      setDistributionActionLoading(null)
+    }
+  }
+
+  const handleMarkDoNotPost = async (plan, target, targetIndex) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Group target updates require VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    if (!window.confirm(`Mark ${target.group_name} as do_not_post?`)) return
+    setDistributionActionLoading(`${plan.plan_id}:${targetIndex}`)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/group-targets/${target.group_target_id}`, {
+        method: 'PUT',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          identity_appropriateness: 'do_not_post',
+          operator_notes: `Marked do_not_post from distribution plan ${plan.plan_id}`,
+          last_updated_by: 'carlos',
+        }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      await handleUpdateDistributionTarget(plan.plan_id, targetIndex, {
+        status: 'rejected_by_operator',
+        operator_notes: 'Marked do_not_post in group target registry.',
+      })
+      setActionSuccess(`Marked do_not_post: ${target.group_name}`)
+      setTimeout(() => setActionSuccess(null), 4000)
+    } catch (err) {
+      setActionError(`Do-not-post update failed: ${err.message}`)
+    } finally {
+      setDistributionActionLoading(null)
+    }
+  }
+
   const handleCopyManual = async (campaign) => {
     const text = campaign.message || campaign.generated_copy || ''
     try {
@@ -787,6 +942,20 @@ export default function CampaignDashboard() {
           onResetJob={handleResetCanaryJob}
           onMarkReviewed={handleMarkReviewed}
           canarySourceCampaign={canarySourceCampaign}
+        />
+      )}
+
+      {workspace === 'distribution' && (
+        <DistributionWorkspace
+          pageAnchors={published.filter(isAnymalPageAnchor)}
+          distributionPlans={distributionPlans}
+          distributionLoading={distributionLoading}
+          hasAdminKey={HAS_MARKETING_ADMIN_KEY}
+          onComposePlan={handleComposeDistributionPlan}
+          onUpdateTarget={handleUpdateDistributionTarget}
+          onBatchApprove={handleBatchApproveTargets}
+          onMarkDoNotPost={handleMarkDoNotPost}
+          actionLoading={distributionActionLoading}
         />
       )}
 

@@ -68,6 +68,14 @@ export default function OpsMetricsRow({ stats }) {
       tone: stats.canaryNeedsReviewCount ? '#ffd54f' : '#00e676',
     },
     {
+      label: 'Distribution plans',
+      value: stats.distributionPlansCount,
+      detail: stats.distributionPlansAwaitingApproval
+        ? `${stats.distributionPlansAwaitingApproval} pending approval`
+        : `${stats.distributionPlansReadyForExecution} ready`,
+      tone: stats.distributionPlansAwaitingApproval ? '#ffd54f' : '#00e676',
+    },
+    {
       label: 'Published',
       value: stats.publishedPosts,
       detail: `${stats.publishedTodayCount} today`,
