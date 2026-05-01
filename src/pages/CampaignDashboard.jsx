@@ -8,6 +8,7 @@ import DraftReviewWorkspace from '../components/dashboard/DraftReviewWorkspace'
 import CanaryBuilderWorkspace from '../components/dashboard/CanaryBuilderWorkspace'
 import PublishedWorkspace from '../components/dashboard/PublishedWorkspace'
 import DistributionWorkspace from '../components/dashboard/DistributionWorkspace'
+import ShareOutcomeTrackerWorkspace from '../components/dashboard/ShareOutcomeTrackerWorkspace'
 import { buildOpsStats, isAnymalPageAnchor } from '../components/dashboard/dashboardRules'
 
 const REFRESH_INTERVAL = 60
@@ -162,6 +163,8 @@ export default function CampaignDashboard() {
   const [published, setPublished] = useState([])
   const [canaryJobs, setCanaryJobs] = useState([])
   const [distributionPlans, setDistributionPlans] = useState([])
+  const [shareOutcomes, setShareOutcomes] = useState([])
+  const [shareOutcomeSummary, setShareOutcomeSummary] = useState({})
   const [activeChannel, setActiveChannel] = useState('all')
   const [workspace, setWorkspace] = useState('drafts')
   const [canaryZip, setCanaryZip] = useState(DEFAULT_CANARY_ZIP)
@@ -178,6 +181,8 @@ export default function CampaignDashboard() {
   const [canaryCreating, setCanaryCreating] = useState(false)
   const [distributionLoading, setDistributionLoading] = useState(false)
   const [distributionActionLoading, setDistributionActionLoading] = useState(null)
+  const [outcomeLoading, setOutcomeLoading] = useState(false)
+  const [outcomeActionLoading, setOutcomeActionLoading] = useState(null)
   const [copyLoading, setCopyLoading] = useState(null)
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [confirmLoading, setConfirmLoading] = useState(false)
@@ -215,7 +220,9 @@ export default function CampaignDashboard() {
     canaryJobs,
     pendingZipGroups,
     distributionPlans,
-  }), [canaryJobs, distributionPlans, pending, pendingZipGroups, published])
+    shareOutcomes,
+    shareOutcomeSummary,
+  }), [canaryJobs, distributionPlans, pending, pendingZipGroups, published, shareOutcomeSummary, shareOutcomes])
 
   const workspaceTabs = useMemo(() => ([
     {
@@ -246,13 +253,22 @@ export default function CampaignDashboard() {
       tone: opsStats.distributionPlansAwaitingApproval ? '#ffd54f' : '#00e676',
     },
     {
+      id: 'outcomes',
+      label: 'Outcomes',
+      count: shareOutcomes.length,
+      detail: opsStats.shareOutcomesInFlight
+        ? `${opsStats.shareOutcomesInFlight} in flight`
+        : `${opsStats.shareOutcomesSubmitted} submitted`,
+      tone: opsStats.shareOutcomesBlocked ? '#ff4444' : opsStats.shareOutcomesInFlight ? '#4da3ff' : '#00e676',
+    },
+    {
       id: 'published',
       label: 'Published',
       count: published.length,
       detail: `${opsStats.publishedTodayCount} today`,
       tone: '#00e676',
     },
-  ]), [canaryJobs.length, distributionPlans.length, opsStats, pending.length, published.length])
+  ]), [canaryJobs.length, distributionPlans.length, opsStats, pending.length, published.length, shareOutcomes.length])
 
   useEffect(() => {
     if (!selectedAnchorId && pageAnchors[0]) {
@@ -323,6 +339,18 @@ export default function CampaignDashboard() {
         console.error('Failed to fetch distribution plans:', err)
       } finally {
         setDistributionLoading(false)
+      }
+      setOutcomeLoading(true)
+      try {
+        const res5 = await fetch(`${MARKETING_API}/share-outcomes?limit=100`, { headers: adminHeaders })
+        if (!res5.ok) throw new Error(`${res5.status}`)
+        const json5 = await res5.json()
+        setShareOutcomes(json5.share_outcomes || [])
+        setShareOutcomeSummary(json5.summary || {})
+      } catch (err) {
+        console.error('Failed to fetch share outcomes:', err)
+      } finally {
+        setOutcomeLoading(false)
       }
     }
   }, [activeChannel])
@@ -847,6 +875,39 @@ export default function CampaignDashboard() {
     }
   }
 
+  const replaceShareOutcome = (updatedOutcome) => {
+    setShareOutcomes(outcomes => outcomes.map(outcome => (
+      outcome.share_outcome_id === updatedOutcome.share_outcome_id ? updatedOutcome : outcome
+    )))
+  }
+
+  const handleUpdateShareOutcome = async (shareOutcomeId, payload) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Outcome updates require VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setOutcomeActionLoading(shareOutcomeId)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/share-outcomes/${shareOutcomeId}`, {
+        method: 'PUT',
+        headers: adminHeaders,
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const outcome = await res.json()
+      replaceShareOutcome(outcome)
+      setActionSuccess(`Share outcome updated: ${outcome.group_name || shareOutcomeId}`)
+      setTimeout(() => setActionSuccess(null), 4000)
+      await fetchData()
+    } catch (err) {
+      setActionError(`Outcome update failed: ${err.message}`)
+      throw err
+    } finally {
+      setOutcomeActionLoading(null)
+    }
+  }
+
   const handleCopyManual = async (campaign) => {
     const text = campaign.message || campaign.generated_copy || ''
     try {
@@ -956,6 +1017,17 @@ export default function CampaignDashboard() {
           onBatchApprove={handleBatchApproveTargets}
           onMarkDoNotPost={handleMarkDoNotPost}
           actionLoading={distributionActionLoading}
+        />
+      )}
+
+      {workspace === 'outcomes' && (
+        <ShareOutcomeTrackerWorkspace
+          shareOutcomes={shareOutcomes}
+          summary={shareOutcomeSummary}
+          outcomeLoading={outcomeLoading}
+          hasAdminKey={HAS_MARKETING_ADMIN_KEY}
+          onUpdateOutcome={handleUpdateShareOutcome}
+          actionLoading={outcomeActionLoading}
         />
       )}
 

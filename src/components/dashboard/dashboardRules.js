@@ -40,6 +40,16 @@ export const NEXT_ACTION_RULES = [
     }),
   },
   {
+    id: 'attended_share_outcome_pending',
+    priority: 37,
+    when: stats => stats.shareOutcomesInFlight > 0,
+    getMessage: stats => ({
+      title: 'Record attended share outcomes',
+      detail: `${stats.shareOutcomesInFlight} group share outcome${stats.shareOutcomesInFlight > 1 ? 's are' : ' is'} awaiting final operator status.`,
+      tone: '#4da3ff',
+    }),
+  },
+  {
     id: 'canary_job_ready',
     priority: 40,
     when: stats => stats.pageAnchorsCount > 0 && stats.canaryJobsCount === 0,
@@ -104,7 +114,15 @@ function distributionPlanReady(plan) {
   return plan.plan_status === 'approved' || Number(plan.approved_count || 0) > 0
 }
 
-export function buildOpsStats({ pending, published, canaryJobs, pendingZipGroups, distributionPlans = [] }) {
+export function buildOpsStats({
+  pending,
+  published,
+  canaryJobs,
+  pendingZipGroups,
+  distributionPlans = [],
+  shareOutcomes = [],
+  shareOutcomeSummary = {},
+}) {
   const zipGroups = pendingZipGroups.filter(group => group.zip !== 'other')
   const staleGroups = zipGroups.filter(group => group.zipStatus === 'needs_review_stale_anchor')
   const missingCreativeGroups = zipGroups.filter(group => (
@@ -117,6 +135,15 @@ export function buildOpsStats({ pending, published, canaryJobs, pendingZipGroups
     && campaign.status !== 'needs_creative_review'
   )).length
   const allPageAnchors = published.filter(isAnymalPageAnchor)
+  const shareOutcomesInFlight = Number(shareOutcomeSummary.in_flight || shareOutcomes.filter(outcome => (
+    ['queued', 'approved_for_attended_share', 'running'].includes(outcome.status)
+  )).length)
+  const shareOutcomesSubmitted = Number(shareOutcomeSummary.submitted || shareOutcomes.filter(outcome => (
+    ['submitted_visible_or_feed', 'pending_admin_approval'].includes(outcome.status)
+  )).length)
+  const shareOutcomesBlocked = Number(shareOutcomeSummary.blocked || shareOutcomes.filter(outcome => (
+    String(outcome.status || '').startsWith('blocked_')
+  )).length)
 
   return {
     pendingDrafts: pending.length,
@@ -133,6 +160,11 @@ export function buildOpsStats({ pending, published, canaryJobs, pendingZipGroups
     distributionPlansAwaitingApproval: distributionPlans.filter(distributionPlanNeedsApproval).length,
     distributionPlansReadyForExecution: distributionPlans.filter(distributionPlanReady).length,
     distributionTargetsNeedsReviewCount: distributionPlans.reduce((total, plan) => total + Number(plan.needs_review_count || 0), 0),
+    shareOutcomesCount: Number(shareOutcomeSummary.total || shareOutcomes.length),
+    shareOutcomesSubmitted,
+    shareOutcomesBlocked,
+    shareOutcomesInFlight,
+    shareOutcomeGroupsAttempted: Number(shareOutcomeSummary.groups_attempted || 0),
     canaryJobsCount: canaryJobs.length,
     canaryNeedsReviewCount: canaryJobs.filter(canaryJobNeedsReview).length,
     activeCanaryJobsCount: canaryJobs.filter(canaryJobIsActive).length,
