@@ -76,6 +76,14 @@ export default function OpsMetricsRow({ stats }) {
       tone: stats.distributionPlansAwaitingApproval ? '#ffd54f' : '#00e676',
     },
     {
+      label: 'Group shares',
+      value: stats.shareOutcomesCount,
+      detail: stats.shareOutcomesInFlight
+        ? `${stats.shareOutcomesInFlight} awaiting status`
+        : `${stats.shareOutcomesSubmitted} submitted`,
+      tone: stats.shareOutcomesBlocked ? '#ff4444' : stats.shareOutcomesInFlight ? '#4da3ff' : '#00e676',
+    },
+    {
       label: 'Published',
       value: stats.publishedPosts,
       detail: `${stats.publishedTodayCount} today`,
