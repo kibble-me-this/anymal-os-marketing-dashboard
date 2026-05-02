@@ -1126,6 +1126,7 @@ export default function CampaignDashboard() {
       const run = await res.json()
       replaceAgendaRun(run)
       patchMarketingAgendaItemRun(item.agenda_item_id, run.run_id, run.status === 'waiting_for_carlos' ? 'waiting_for_carlos' : 'running')
+      await fetchData()
       setActionSuccess(`Workflow started: ${run.workflow_title}`)
       setTimeout(() => setActionSuccess(null), 5000)
     } catch (err) {
@@ -1266,6 +1267,7 @@ export default function CampaignDashboard() {
           agenda={marketingAgenda}
           agendaLoading={agendaLoading}
           agendaRuns={agendaRuns}
+          campaigns={allCampaigns}
           hasAdminKey={HAS_MARKETING_ADMIN_KEY}
           onComposeAgenda={handleComposeMarketingAgenda}
           onApproveItem={handleApproveAgendaItem}

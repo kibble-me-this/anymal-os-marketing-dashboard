@@ -129,6 +129,7 @@ function AgendaItemCard({ item, active, onSelect }) {
 function RunControls({
   run,
   activeGate,
+  launchPackageCampaigns,
   onRunNextStep,
   onRecordDecision,
   actionLoading,
@@ -157,6 +158,10 @@ function RunControls({
         </div>
       )}
 
+      {activeGate?.step_id === 'review_launch_package' && (
+        <LaunchPackageReview campaigns={launchPackageCampaigns} zip={run?.linked_entities?.zip} />
+      )}
+
       <textarea
         value={notes}
         onChange={event => setNotes(event.target.value)}
@@ -168,7 +173,7 @@ function RunControls({
           Run safe next step
         </button>
         <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'approved', notes)} disabled={isLoading || !stepId} style={buttonStyle({ filled: true, disabled: isLoading || !stepId })}>
-          Approve gate
+          {activeGate?.step_id === 'review_launch_package' ? 'Approve package' : 'Approve gate'}
         </button>
         <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'completed', notes)} disabled={isLoading || !stepId} style={buttonStyle({ disabled: isLoading || !stepId })}>
           Mark done
@@ -180,6 +185,59 @@ function RunControls({
           Block
         </button>
       </div>
+    </section>
+  )
+}
+
+function LaunchPackageReview({ campaigns = [], zip }) {
+  const rows = (campaigns || [])
+    .filter(campaign => String(campaign?.zip || '').padStart(5, '0') === String(zip || '').padStart(5, '0'))
+    .sort((a, b) => {
+      const aPage = a.channel === 'facebook_page' ? 0 : 1
+      const bPage = b.channel === 'facebook_page' ? 0 : 1
+      if (aPage !== bPage) return aPage - bPage
+      return String(a.channel || '').localeCompare(String(b.channel || ''))
+    })
+  const pageDraft = rows.find(campaign => campaign.channel === 'facebook_page')
+  return (
+    <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', alignItems: 'start' }}>
+        <div>
+          <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Launch package under review</div>
+          <div style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700, marginTop: '4px' }}>
+            {rows.length ? `${rows.length} generated draft assets for ZIP ${zip}` : `No loaded draft assets yet for ZIP ${zip}`}
+          </div>
+        </div>
+        {pageDraft && <StatusPill tone={statusTone(pageDraft.status)}>{pageDraft.status}</StatusPill>}
+      </div>
+      <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
+        Approving this package only confirms the generated draft set is ready for lower-layer review. It does not publish the Page post, approve distribution targets, or perform any personal-account action.
+      </div>
+      {!rows.length && (
+        <div style={{ color: '#ffd54f', fontSize: '12px', lineHeight: 1.45 }}>
+          The backend generated the package, but the dashboard has not loaded the draft records yet. Refresh the dashboard before approving.
+        </div>
+      )}
+      {rows.map(campaign => {
+        const copy = campaign.message || campaign.generated_copy || ''
+        return (
+          <article key={campaign.campaign_id} style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '10px', display: 'grid', gap: '7px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ color: '#e0ffe0', fontSize: '12px', fontWeight: 700 }}>{campaign.channel || 'channel'}</div>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                <StatusPill tone={statusTone(campaign.status)}>{campaign.status || 'draft'}</StatusPill>
+                {campaign.creative_status && <StatusPill tone={campaign.creative_status === 'creative_current' ? '#00e676' : '#ffd54f'}>{campaign.creative_status}</StatusPill>}
+              </div>
+            </div>
+            <div style={{ color: '#4a7a5a', fontSize: '10px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>{campaign.campaign_id}</div>
+            {copy && (
+              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#c8f7c8', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
+                {copy}
+              </pre>
+            )}
+          </article>
+        )
+      })}
     </section>
   )
 }
@@ -256,6 +314,7 @@ export default function TodayAgendaWorkspace({
   agenda,
   agendaLoading,
   agendaRuns,
+  campaigns,
   hasAdminKey,
   onComposeAgenda,
   onApproveItem,
@@ -277,6 +336,11 @@ export default function TodayAgendaWorkspace({
   const activeRunId = selectedItem?.active_run_id
   const activeRun = activeRunId ? agendaRuns[activeRunId] : null
   const activeGate = activeRun?.attended_gate || null
+  const launchPackageCampaigns = useMemo(() => {
+    const zip = String(activeRun?.linked_entities?.zip || selectedItem?.linked_entities?.zip || '').padStart(5, '0')
+    if (!/^\d{5}$/.test(zip)) return []
+    return (campaigns || []).filter(campaign => String(campaign?.zip || '').padStart(5, '0') === zip)
+  }, [activeRun?.linked_entities?.zip, campaigns, selectedItem?.linked_entities?.zip])
   const canGo = Boolean(hasAdminKey && selectedItem && selectedItem.status !== 'completed')
   const isApproving = selectedItem && actionLoading === `approve:${selectedItem.agenda_item_id}`
   const normalizedActivationZip = activationZip.trim()
@@ -461,6 +525,7 @@ export default function TodayAgendaWorkspace({
               <RunControls
                 run={activeRun}
                 activeGate={activeGate}
+                launchPackageCampaigns={launchPackageCampaigns}
                 onRunNextStep={onRunNextStep}
                 onRecordDecision={onRecordDecision}
                 actionLoading={actionLoading}
