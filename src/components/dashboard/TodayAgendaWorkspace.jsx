@@ -187,6 +187,22 @@ function gateEvidenceState(run, activeGate, campaigns) {
         : 'A composed distribution plan with target groups is required before approving targets.',
     }
   }
+  if (gateId === 'stage_personal_share') {
+    return {
+      blocked: true,
+      message: 'Browser staging must be produced by the safe staging step. Do not approve this as a manual gate.',
+    }
+  }
+  if (gateId === 'click_post') {
+    const stageResult = stepResult(run, 'stage_personal_share')
+    const stagedCount = Number(stageResult?.staged_count || 0)
+    return {
+      blocked: stagedCount < 1,
+      message: stagedCount > 0
+        ? ''
+        : 'A browser staging handoff with a share outcome is required before Carlos can click Post.',
+    }
+  }
   return { blocked: false, message: '' }
 }
 
@@ -243,6 +259,10 @@ function RunControls({
 
       {activeGate?.step_id === 'approve_distribution_targets' && (
         <DistributionGateReview run={run} />
+      )}
+
+      {(activeGate?.step_id === 'stage_personal_share' || activeGate?.step_id === 'click_post') && (
+        <PersonalShareStageReview run={run} />
       )}
 
       {gateEvidence.blocked && (
@@ -410,6 +430,7 @@ function PageAnchorGateReview({ campaigns = [], zip, zipLoading = {}, onGenerate
 function DistributionGateReview({ run }) {
   const composeResult = stepResult(run, 'compose_distribution_plan')
   const targetCount = Number(composeResult?.target_count || 0)
+  const targets = Array.isArray(composeResult?.target_groups) ? composeResult.target_groups : []
   return (
     <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
       <div>
@@ -436,6 +457,80 @@ function DistributionGateReview({ run }) {
           Run the safe compose step after Page anchor verification. The backend will block if the anchor is missing.
         </div>
       )}
+      {targets.length > 0 && (
+        <div style={{ display: 'grid', gap: '8px' }}>
+          {targets.map(target => (
+            <article key={`${target.group_target_id || target.group_name}-${target.target_index}`} style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '10px', display: 'grid', gap: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 700 }}>{target.group_name || 'Target group'}</div>
+                <StatusPill tone={statusTone(target.status)}>{target.status || 'queued'}</StatusPill>
+              </div>
+              {target.group_url && <a href={target.group_url} target="_blank" rel="noopener noreferrer" style={{ color: '#00e676', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>{target.group_url}</a>}
+              {target.share_note && (
+                <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#c8f7c8', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
+                  {target.share_note}
+                </pre>
+              )}
+              <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT }}>
+                posting_identity: {target.posting_identity || 'carlos_personal'}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function PersonalShareStageReview({ run }) {
+  const stage = stepResult(run, 'stage_personal_share')
+  const outcomes = Array.isArray(stage?.share_outcomes) ? stage.share_outcomes : []
+  return (
+    <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
+      <div>
+        <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Browser staging handoff</div>
+        <div style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700, marginTop: '4px' }}>
+          {outcomes.length ? `${outcomes.length} attended share target${outcomes.length === 1 ? '' : 's'} prepared` : 'No browser staging artifact prepared yet'}
+        </div>
+      </div>
+      <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
+        The browser agent may open Facebook, find the approved group share surface, and fill the note. It must stop before Post. Carlos clicks Post only after reviewing destination, identity, and copy.
+      </div>
+      {!outcomes.length && (
+        <div style={{ border: '1px solid #ff4444', borderRadius: '6px', background: '#260707', color: '#ffb3b3', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
+          This run is missing the staging result. Return to the safe staging step or ask Codex to repair this workflow run before approving Post.
+        </div>
+      )}
+      {outcomes.map(outcome => (
+        <article key={outcome.share_outcome_id || outcome.target_index} style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '10px', display: 'grid', gap: '8px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 700 }}>{outcome.group_name || 'Target group'}</div>
+            <StatusPill tone={statusTone(outcome.status)}>{outcome.status || 'prepared'}</StatusPill>
+          </div>
+          <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>share_outcome_id: {outcome.share_outcome_id}</div>
+          {outcome.page_anchor_post_url && <a href={outcome.page_anchor_post_url} target="_blank" rel="noopener noreferrer" style={{ color: '#00e676', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>Page anchor: {outcome.page_anchor_post_url}</a>}
+          {outcome.group_url && <a href={outcome.group_url} target="_blank" rel="noopener noreferrer" style={{ color: '#00e676', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>Group: {outcome.group_url}</a>}
+          <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT }}>posting_identity: {outcome.posting_identity || 'carlos_personal'}</div>
+          {outcome.share_note && (
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#c8f7c8', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
+              {outcome.share_note}
+            </pre>
+          )}
+          {outcome.desktop_bridge_command && (
+            <div style={{ display: 'grid', gap: '5px' }}>
+              <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Desktop bridge command</div>
+              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#e0ffe0', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
+                {outcome.desktop_bridge_command}
+              </pre>
+            </div>
+          )}
+          {Array.isArray(outcome.instructions) && outcome.instructions.length > 0 && (
+            <ol style={{ margin: 0, paddingLeft: '18px', color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
+              {outcome.instructions.map(instruction => <li key={instruction}>{instruction}</li>)}
+            </ol>
+          )}
+        </article>
+      ))}
     </section>
   )
 }
