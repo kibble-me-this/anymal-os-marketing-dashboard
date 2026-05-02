@@ -9,6 +9,7 @@ import CanaryBuilderWorkspace from '../components/dashboard/CanaryBuilderWorkspa
 import PublishedWorkspace from '../components/dashboard/PublishedWorkspace'
 import DistributionWorkspace from '../components/dashboard/DistributionWorkspace'
 import ShareOutcomeTrackerWorkspace from '../components/dashboard/ShareOutcomeTrackerWorkspace'
+import NativeVideoWorkspace from '../components/dashboard/NativeVideoWorkspace'
 import { buildOpsStats, isAnymalPageAnchor } from '../components/dashboard/dashboardRules'
 
 const REFRESH_INTERVAL = 60
@@ -165,6 +166,7 @@ export default function CampaignDashboard() {
   const [distributionPlans, setDistributionPlans] = useState([])
   const [shareOutcomes, setShareOutcomes] = useState([])
   const [shareOutcomeSummary, setShareOutcomeSummary] = useState({})
+  const [nativeVideoJobs, setNativeVideoJobs] = useState([])
   const [activeChannel, setActiveChannel] = useState('all')
   const [workspace, setWorkspace] = useState('drafts')
   const [canaryZip, setCanaryZip] = useState(DEFAULT_CANARY_ZIP)
@@ -183,6 +185,8 @@ export default function CampaignDashboard() {
   const [distributionActionLoading, setDistributionActionLoading] = useState(null)
   const [outcomeLoading, setOutcomeLoading] = useState(false)
   const [outcomeActionLoading, setOutcomeActionLoading] = useState(null)
+  const [nativeVideoLoading, setNativeVideoLoading] = useState(false)
+  const [nativeVideoActionLoading, setNativeVideoActionLoading] = useState(null)
   const [copyLoading, setCopyLoading] = useState(null)
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [confirmLoading, setConfirmLoading] = useState(false)
@@ -222,7 +226,8 @@ export default function CampaignDashboard() {
     distributionPlans,
     shareOutcomes,
     shareOutcomeSummary,
-  }), [canaryJobs, distributionPlans, pending, pendingZipGroups, published, shareOutcomeSummary, shareOutcomes])
+    nativeVideoJobs,
+  }), [canaryJobs, distributionPlans, nativeVideoJobs, pending, pendingZipGroups, published, shareOutcomeSummary, shareOutcomes])
 
   const workspaceTabs = useMemo(() => ([
     {
@@ -253,6 +258,15 @@ export default function CampaignDashboard() {
       tone: opsStats.distributionPlansAwaitingApproval ? '#ffd54f' : '#00e676',
     },
     {
+      id: 'nativeVideo',
+      label: 'Native video',
+      count: nativeVideoJobs.length,
+      detail: opsStats.nativeVideoPendingReview
+        ? `${opsStats.nativeVideoPendingReview} review`
+        : `${opsStats.nativeVideoGenerating} generating`,
+      tone: opsStats.nativeVideoPendingReview ? '#ffd54f' : opsStats.nativeVideoGenerating ? '#4da3ff' : '#00e676',
+    },
+    {
       id: 'outcomes',
       label: 'Outcomes',
       count: shareOutcomes.length,
@@ -268,7 +282,7 @@ export default function CampaignDashboard() {
       detail: `${opsStats.publishedTodayCount} today`,
       tone: '#00e676',
     },
-  ]), [canaryJobs.length, distributionPlans.length, opsStats, pending.length, published.length, shareOutcomes.length])
+  ]), [canaryJobs.length, distributionPlans.length, nativeVideoJobs.length, opsStats, pending.length, published.length, shareOutcomes.length])
 
   useEffect(() => {
     if (!selectedAnchorId && pageAnchors[0]) {
@@ -351,6 +365,17 @@ export default function CampaignDashboard() {
         console.error('Failed to fetch share outcomes:', err)
       } finally {
         setOutcomeLoading(false)
+      }
+      setNativeVideoLoading(true)
+      try {
+        const res6 = await fetch(`${MARKETING_API}/native-video/jobs?limit=50`, { headers: adminHeaders })
+        if (!res6.ok) throw new Error(`${res6.status}`)
+        const json6 = await res6.json()
+        setNativeVideoJobs(json6.native_video_jobs || [])
+      } catch (err) {
+        console.error('Failed to fetch native video jobs:', err)
+      } finally {
+        setNativeVideoLoading(false)
       }
     }
   }, [activeChannel])
@@ -908,6 +933,94 @@ export default function CampaignDashboard() {
     }
   }
 
+  const replaceNativeVideoJob = (updatedJob) => {
+    setNativeVideoJobs(jobs => {
+      const exists = jobs.some(job => job.video_job_id === updatedJob.video_job_id)
+      const next = exists
+        ? jobs.map(job => job.video_job_id === updatedJob.video_job_id ? updatedJob : job)
+        : [updatedJob, ...jobs]
+      return next.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    })
+  }
+
+  const handleCreateNativeVideoJob = async (payload) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Native video generation requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setNativeVideoActionLoading('create')
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/native-video/jobs`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const job = await res.json()
+      replaceNativeVideoJob(job)
+      setWorkspace('nativeVideo')
+      setActionSuccess(`Native video job created: ${job.video_job_id}`)
+      setTimeout(() => setActionSuccess(null), 5000)
+    } catch (err) {
+      setActionError(`Native video job failed: ${err.message}`)
+      throw err
+    } finally {
+      setNativeVideoActionLoading(null)
+    }
+  }
+
+  const handleSyncNativeVideoJob = async (videoJobId) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Native video sync requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setNativeVideoActionLoading(`sync:${videoJobId}`)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/native-video/jobs/${videoJobId}/sync-provider`, {
+        method: 'POST',
+        headers: adminHeaders,
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const job = await res.json()
+      replaceNativeVideoJob(job)
+      setActionSuccess(`Native video synced: ${videoJobId}`)
+      setTimeout(() => setActionSuccess(null), 4000)
+    } catch (err) {
+      setActionError(`Native video sync failed: ${err.message}`)
+      throw err
+    } finally {
+      setNativeVideoActionLoading(null)
+    }
+  }
+
+  const handleReviewNativeVideoJob = async (videoJobId, payload) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Native video review requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setNativeVideoActionLoading(`review:${videoJobId}`)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/native-video/jobs/${videoJobId}/review`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const job = await res.json()
+      replaceNativeVideoJob(job)
+      setActionSuccess(`Native video reviewed: ${job.review_status}`)
+      setTimeout(() => setActionSuccess(null), 4000)
+    } catch (err) {
+      setActionError(`Native video review failed: ${err.message}`)
+      throw err
+    } finally {
+      setNativeVideoActionLoading(null)
+    }
+  }
+
   const handleCopyManual = async (campaign) => {
     const text = campaign.message || campaign.generated_copy || ''
     try {
@@ -1028,6 +1141,18 @@ export default function CampaignDashboard() {
           hasAdminKey={HAS_MARKETING_ADMIN_KEY}
           onUpdateOutcome={handleUpdateShareOutcome}
           actionLoading={outcomeActionLoading}
+        />
+      )}
+
+      {workspace === 'nativeVideo' && (
+        <NativeVideoWorkspace
+          nativeVideoJobs={nativeVideoJobs}
+          nativeVideoLoading={nativeVideoLoading}
+          hasAdminKey={HAS_MARKETING_ADMIN_KEY}
+          onCreateJob={handleCreateNativeVideoJob}
+          onSyncJob={handleSyncNativeVideoJob}
+          onReviewJob={handleReviewNativeVideoJob}
+          actionLoading={nativeVideoActionLoading}
         />
       )}
 
