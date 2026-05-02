@@ -184,6 +184,48 @@ function RunControls({
   )
 }
 
+function ZipActivationRecommendation({ item }) {
+  if (item?.workflow_type !== 'zip_price_activation') return null
+  const entities = item.linked_entities || {}
+  const metricRows = [
+    ['Freshness', entities.activation_priority],
+    ['Anchor age', entities.anchor_age_days !== undefined && entities.anchor_age_days !== null ? `${entities.anchor_age_days} days` : null],
+    ['Nearby barns', entities.nearby_count],
+    ['Source types', entities.source_count],
+    ['Top ZIP fidelity', entities.fidelity_score],
+    ['Score', entities.activation_score],
+  ].filter(([, value]) => value !== null && value !== undefined && value !== '')
+  return (
+    <section style={{ border: '1px solid #00e676', borderRadius: '6px', background: '#04200f', padding: '12px', display: 'grid', gap: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'start', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ color: '#00e676', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Recommended ZIP to activate</div>
+          <div style={{ color: '#e0ffe0', fontSize: '15px', fontWeight: 700, marginTop: '5px' }}>
+            {entities.zip} {entities.city ? `| ${entities.city}` : ''} {entities.county ? `| ${entities.county}` : ''}
+          </div>
+        </div>
+        {entities.recommendation_rank && <StatusPill tone="#00e676">rank {entities.recommendation_rank}</StatusPill>}
+      </div>
+      <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
+        {entities.recommendation_summary || item.research_summary}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px' }}>
+        {metricRows.map(([label, value]) => (
+          <div key={label} style={{ border: '1px solid #1a3a2a', borderRadius: '5px', padding: '9px', background: '#031808' }}>
+            <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</div>
+            <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 700, marginTop: '5px' }}>{String(value)}</div>
+          </div>
+        ))}
+      </div>
+      {entities.landing_url && (
+        <a href={entities.landing_url} target="_blank" rel="noreferrer" style={{ color: '#00e676', fontSize: '12px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>
+          {entities.landing_url}
+        </a>
+      )}
+    </section>
+  )
+}
+
 export default function TodayAgendaWorkspace({
   agenda,
   agendaLoading,
@@ -344,6 +386,8 @@ export default function TodayAgendaWorkspace({
                 <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
                   {selectedItem.research_summary}
                 </div>
+
+                <ZipActivationRecommendation item={selectedItem} />
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '10px' }}>
                   <ReadinessList title="Readiness checks" checks={selectedItem.readiness_checks} />
