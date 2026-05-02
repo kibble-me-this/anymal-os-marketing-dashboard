@@ -38,6 +38,14 @@ function MetricCard({ label, value, detail, tone = '#00e676' }) {
 export default function OpsMetricsRow({ stats }) {
   const cards = [
     {
+      label: 'Today agenda',
+      value: stats.marketingAgendaItems,
+      detail: stats.marketingAgendaWaiting
+        ? `${stats.marketingAgendaWaiting} waiting for Carlos`
+        : `${stats.marketingAgendaReadyItems} ready`,
+      tone: stats.marketingAgendaWaiting ? '#ffd54f' : '#00e676',
+    },
+    {
       label: 'Pending drafts',
       value: stats.pendingDrafts,
       detail: plural(stats.zipGroups, 'ZIP queue'),
