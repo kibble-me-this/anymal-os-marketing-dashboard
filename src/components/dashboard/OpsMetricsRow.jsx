@@ -84,6 +84,14 @@ export default function OpsMetricsRow({ stats }) {
       tone: stats.shareOutcomesBlocked ? '#ff4444' : stats.shareOutcomesInFlight ? '#4da3ff' : '#00e676',
     },
     {
+      label: 'Native videos',
+      value: stats.nativeVideoJobsCount,
+      detail: stats.nativeVideoPendingReview
+        ? `${stats.nativeVideoPendingReview} ready for review`
+        : `${stats.nativeVideoGenerating} generating`,
+      tone: stats.nativeVideoPendingReview ? '#ffd54f' : stats.nativeVideoGenerating ? '#4da3ff' : '#00e676',
+    },
+    {
       label: 'Published',
       value: stats.publishedPosts,
       detail: `${stats.publishedTodayCount} today`,

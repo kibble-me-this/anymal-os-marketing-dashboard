@@ -50,6 +50,16 @@ export const NEXT_ACTION_RULES = [
     }),
   },
   {
+    id: 'native_video_pending_review',
+    priority: 38,
+    when: stats => stats.nativeVideoPendingReview > 0,
+    getMessage: stats => ({
+      title: 'Review native video drafts',
+      detail: `${stats.nativeVideoPendingReview} video job${stats.nativeVideoPendingReview > 1 ? 's are' : ' is'} ready for operator review.`,
+      tone: '#ffd54f',
+    }),
+  },
+  {
     id: 'canary_job_ready',
     priority: 40,
     when: stats => stats.pageAnchorsCount > 0 && stats.canaryJobsCount === 0,
@@ -114,6 +124,14 @@ function distributionPlanReady(plan) {
   return plan.plan_status === 'approved' || Number(plan.approved_count || 0) > 0
 }
 
+function nativeVideoNeedsReview(job) {
+  return job.review_status === 'pending_review'
+}
+
+function nativeVideoIsGenerating(job) {
+  return job.status === 'provider_submitted' || job.review_status === 'pending_generation'
+}
+
 export function buildOpsStats({
   pending,
   published,
@@ -122,6 +140,7 @@ export function buildOpsStats({
   distributionPlans = [],
   shareOutcomes = [],
   shareOutcomeSummary = {},
+  nativeVideoJobs = [],
 }) {
   const zipGroups = pendingZipGroups.filter(group => group.zip !== 'other')
   const staleGroups = zipGroups.filter(group => group.zipStatus === 'needs_review_stale_anchor')
@@ -165,6 +184,10 @@ export function buildOpsStats({
     shareOutcomesBlocked,
     shareOutcomesInFlight,
     shareOutcomeGroupsAttempted: Number(shareOutcomeSummary.groups_attempted || 0),
+    nativeVideoJobsCount: nativeVideoJobs.length,
+    nativeVideoPendingReview: nativeVideoJobs.filter(nativeVideoNeedsReview).length,
+    nativeVideoGenerating: nativeVideoJobs.filter(nativeVideoIsGenerating).length,
+    nativeVideoApproved: nativeVideoJobs.filter(job => job.review_status === 'approved').length,
     canaryJobsCount: canaryJobs.length,
     canaryNeedsReviewCount: canaryJobs.filter(canaryJobNeedsReview).length,
     activeCanaryJobsCount: canaryJobs.filter(canaryJobIsActive).length,
