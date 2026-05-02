@@ -1062,6 +1062,7 @@ export default function CampaignDashboard() {
       force_refresh: forceRefresh,
       ...(options.include_workflow_types ? { include_workflow_types: options.include_workflow_types } : {}),
       ...(options.candidate_zips ? { candidate_zips: options.candidate_zips } : {}),
+      ...(options.excluded_zips ? { excluded_zips: options.excluded_zips } : {}),
       ...(options.zip_activation_limit ? { zip_activation_limit: options.zip_activation_limit } : {}),
       ...(options.operator_notes ? { operator_notes: options.operator_notes } : {}),
     }
@@ -1079,7 +1080,7 @@ export default function CampaignDashboard() {
       setMarketingAgenda(agenda)
       setWorkspace('agenda')
       const zip = options.candidate_zips?.[0]
-      setActionSuccess(zip ? `ZIP activation workflow composed for ${zip}.` : forceRefresh ? 'Fresh marketing agenda composed.' : 'Marketing agenda loaded.')
+      setActionSuccess(zip ? `ZIP activation workflow composed for ${zip}.` : options.excluded_zips?.length ? 'Next eligible ZIP activation workflow composed.' : forceRefresh ? 'Fresh marketing agenda composed.' : 'Marketing agenda loaded.')
       setTimeout(() => setActionSuccess(null), 4000)
     } catch (err) {
       setActionError(`Marketing agenda failed: ${err.message}`)

@@ -184,15 +184,19 @@ function RunControls({
   )
 }
 
-function ZipActivationRecommendation({ item }) {
+function ZipActivationRecommendation({ item, onPassZip, disabled }) {
   if (item?.workflow_type !== 'zip_price_activation') return null
   const entities = item.linked_entities || {}
+  const publicPageNotes = Array.isArray(entities.public_page_notes) ? entities.public_page_notes : []
   const metricRows = [
     ['Freshness', entities.activation_priority],
     ['Anchor age', entities.anchor_age_days !== undefined && entities.anchor_age_days !== null ? `${entities.anchor_age_days} days` : null],
     ['Nearby barns', entities.nearby_count],
     ['Source types', entities.source_count],
     ['Top ZIP fidelity', entities.fidelity_score],
+    ['Public page', entities.public_page_grade],
+    ['Visible fresh', entities.visible_fresh_count],
+    ['Visible stale', entities.visible_stale_count],
     ['Score', entities.activation_score],
   ].filter(([, value]) => value !== null && value !== undefined && value !== '')
   return (
@@ -204,11 +208,23 @@ function ZipActivationRecommendation({ item }) {
             {entities.zip} {entities.city ? `| ${entities.city}` : ''} {entities.county ? `| ${entities.county}` : ''}
           </div>
         </div>
-        {entities.recommendation_rank && <StatusPill tone="#00e676">rank {entities.recommendation_rank}</StatusPill>}
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {entities.recommendation_rank && <StatusPill tone="#00e676">rank {entities.recommendation_rank}</StatusPill>}
+          {entities.public_page_grade && <StatusPill tone={entities.public_page_grade === 'strong' ? '#00e676' : entities.public_page_grade === 'usable' ? '#ffd54f' : '#ff4444'}>{entities.public_page_grade} page</StatusPill>}
+        </div>
       </div>
       <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
         {entities.recommendation_summary || item.research_summary}
       </div>
+      {publicPageNotes.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {publicPageNotes.map(note => (
+            <span key={note} style={{ border: '1px solid #1a3a2a', borderRadius: '999px', color: '#8abf8a', padding: '4px 8px', fontSize: '10px' }}>
+              {note}
+            </span>
+          ))}
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px' }}>
         {metricRows.map(([label, value]) => (
           <div key={label} style={{ border: '1px solid #1a3a2a', borderRadius: '5px', padding: '9px', background: '#031808' }}>
@@ -222,6 +238,16 @@ function ZipActivationRecommendation({ item }) {
           {entities.landing_url}
         </a>
       )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          onClick={() => onPassZip?.(entities.zip)}
+          disabled={disabled || !entities.zip}
+          style={buttonStyle({ tone: '#ffd54f', disabled: disabled || !entities.zip })}
+        >
+          Pass ZIP, show next best
+        </button>
+      </div>
     </section>
   )
 }
@@ -241,6 +267,7 @@ export default function TodayAgendaWorkspace({
   const items = useMemo(() => agenda?.items || [], [agenda])
   const [selectedItemId, setSelectedItemId] = useState('')
   const [activationZip, setActivationZip] = useState('')
+  const [passedActivationZips, setPassedActivationZips] = useState([])
   const selectedItem = useMemo(() => (
     items.find(item => item.agenda_item_id === selectedItemId)
     || items.find(item => item.agenda_item_id === agenda?.primary_item_id)
@@ -255,6 +282,20 @@ export default function TodayAgendaWorkspace({
   const normalizedActivationZip = activationZip.trim()
   const activationZipValid = /^\d{5}$/.test(normalizedActivationZip)
   const activationLoading = actionLoading === 'compose:zip'
+  const composeNextZip = (excludedZips = passedActivationZips, operatorNotes = 'Carlos requested the next eligible ZIP activation.') => onComposeAgenda(true, {
+    include_workflow_types: ['zip_price_activation'],
+    zip_activation_limit: 1,
+    excluded_zips: excludedZips,
+    operator_notes: operatorNotes,
+    loadingKey: 'compose:zip',
+  })
+  const handlePassZip = (zip) => {
+    const normalizedZip = String(zip || '').trim().padStart(5, '0')
+    if (!/^\d{5}$/.test(normalizedZip)) return
+    const nextPassed = Array.from(new Set([...passedActivationZips, normalizedZip]))
+    setPassedActivationZips(nextPassed)
+    composeNextZip(nextPassed, `Carlos passed ZIP ${normalizedZip}; show the next best eligible ZIP activation.`)
+  }
 
   return (
     <div style={{ display: 'grid', gap: '14px' }}>
@@ -310,18 +351,18 @@ export default function TodayAgendaWorkspace({
             </button>
             <button
               type="button"
-              onClick={() => onComposeAgenda(true, {
-                include_workflow_types: ['zip_price_activation'],
-                zip_activation_limit: 1,
-                operator_notes: 'Carlos requested the next eligible ZIP activation.',
-                loadingKey: 'compose:zip',
-              })}
+              onClick={() => composeNextZip()}
               disabled={!hasAdminKey || activationLoading}
               style={buttonStyle({ disabled: !hasAdminKey || activationLoading })}
             >
               Find next ZIP
             </button>
           </div>
+          {passedActivationZips.length > 0 && (
+            <div style={{ color: '#8abf8a', fontSize: '11px' }}>
+              Passed this session: {passedActivationZips.join(', ')}
+            </div>
+          )}
           {activationZip && !activationZipValid && (
             <div style={{ color: '#ffd54f', fontSize: '11px' }}>Enter a 5 digit ZIP before composing this workflow.</div>
           )}
@@ -387,7 +428,7 @@ export default function TodayAgendaWorkspace({
                   {selectedItem.research_summary}
                 </div>
 
-                <ZipActivationRecommendation item={selectedItem} />
+                <ZipActivationRecommendation item={selectedItem} onPassZip={handlePassZip} disabled={!hasAdminKey || activationLoading} />
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '10px' }}>
                   <ReadinessList title="Readiness checks" checks={selectedItem.readiness_checks} />
