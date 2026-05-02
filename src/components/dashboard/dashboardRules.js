@@ -1,5 +1,17 @@
 export const NEXT_ACTION_RULES = [
   {
+    id: 'today_marketing_agenda_ready',
+    priority: 5,
+    when: stats => stats.marketingAgendaReadyItems > 0 || stats.marketingAgendaWaiting > 0,
+    getMessage: stats => ({
+      title: stats.marketingAgendaWaiting ? 'Unblock today\'s marketing workflow' : 'Start with today\'s marketing agenda',
+      detail: stats.marketingAgendaWaiting
+        ? `${stats.marketingAgendaWaiting} workflow${stats.marketingAgendaWaiting > 1 ? 's are' : ' is'} waiting for Carlos review.`
+        : `${stats.marketingAgendaReadyItems} workflow${stats.marketingAgendaReadyItems > 1 ? 's are' : ' is'} ready for go/no-go.`,
+      tone: stats.marketingAgendaWaiting ? '#ffd54f' : '#00e676',
+    }),
+  },
+  {
     id: 'stale_anchor_block',
     priority: 10,
     when: stats => stats.staleZipGroups > 0,
@@ -141,6 +153,8 @@ export function buildOpsStats({
   shareOutcomes = [],
   shareOutcomeSummary = {},
   nativeVideoJobs = [],
+  marketingAgenda = null,
+  agendaRuns = {},
 }) {
   const zipGroups = pendingZipGroups.filter(group => group.zip !== 'other')
   const staleGroups = zipGroups.filter(group => group.zipStatus === 'needs_review_stale_anchor')
@@ -163,8 +177,16 @@ export function buildOpsStats({
   const shareOutcomesBlocked = Number(shareOutcomeSummary.blocked || shareOutcomes.filter(outcome => (
     String(outcome.status || '').startsWith('blocked_')
   )).length)
+  const agendaItems = marketingAgenda?.items || []
+  const agendaRunRows = Object.values(agendaRuns || {})
 
   return {
+    marketingAgendaItems: agendaItems.length,
+    marketingAgendaReadyItems: agendaItems.filter(item => item.status === 'ready_for_go').length,
+    marketingAgendaWaiting: agendaItems.filter(item => item.status === 'waiting_for_carlos').length
+      + agendaRunRows.filter(run => run.status === 'waiting_for_carlos').length,
+    marketingAgendaRunning: agendaItems.filter(item => item.status === 'running').length
+      + agendaRunRows.filter(run => run.status === 'running').length,
     pendingDrafts: pending.length,
     zipGroups: zipGroups.length,
     staleZipGroups: staleGroups.length,

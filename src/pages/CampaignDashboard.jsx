@@ -10,6 +10,7 @@ import PublishedWorkspace from '../components/dashboard/PublishedWorkspace'
 import DistributionWorkspace from '../components/dashboard/DistributionWorkspace'
 import ShareOutcomeTrackerWorkspace from '../components/dashboard/ShareOutcomeTrackerWorkspace'
 import NativeVideoWorkspace from '../components/dashboard/NativeVideoWorkspace'
+import TodayAgendaWorkspace from '../components/dashboard/TodayAgendaWorkspace'
 import { buildOpsStats, isAnymalPageAnchor } from '../components/dashboard/dashboardRules'
 
 const REFRESH_INTERVAL = 60
@@ -167,8 +168,10 @@ export default function CampaignDashboard() {
   const [shareOutcomes, setShareOutcomes] = useState([])
   const [shareOutcomeSummary, setShareOutcomeSummary] = useState({})
   const [nativeVideoJobs, setNativeVideoJobs] = useState([])
+  const [marketingAgenda, setMarketingAgenda] = useState(null)
+  const [agendaRuns, setAgendaRuns] = useState({})
   const [activeChannel, setActiveChannel] = useState('all')
-  const [workspace, setWorkspace] = useState('drafts')
+  const [workspace, setWorkspace] = useState('agenda')
   const [canaryZip, setCanaryZip] = useState(DEFAULT_CANARY_ZIP)
   const [selectedAnchorId, setSelectedAnchorId] = useState('')
   const [targetGroups, setTargetGroups] = useState([{ ...EMPTY_TARGET_GROUP }])
@@ -187,6 +190,8 @@ export default function CampaignDashboard() {
   const [outcomeActionLoading, setOutcomeActionLoading] = useState(null)
   const [nativeVideoLoading, setNativeVideoLoading] = useState(false)
   const [nativeVideoActionLoading, setNativeVideoActionLoading] = useState(null)
+  const [agendaLoading, setAgendaLoading] = useState(false)
+  const [agendaActionLoading, setAgendaActionLoading] = useState(null)
   const [copyLoading, setCopyLoading] = useState(null)
   const [pendingConfirm, setPendingConfirm] = useState(null)
   const [confirmLoading, setConfirmLoading] = useState(false)
@@ -227,9 +232,20 @@ export default function CampaignDashboard() {
     shareOutcomes,
     shareOutcomeSummary,
     nativeVideoJobs,
-  }), [canaryJobs, distributionPlans, nativeVideoJobs, pending, pendingZipGroups, published, shareOutcomeSummary, shareOutcomes])
+    marketingAgenda,
+    agendaRuns,
+  }), [agendaRuns, canaryJobs, distributionPlans, marketingAgenda, nativeVideoJobs, pending, pendingZipGroups, published, shareOutcomeSummary, shareOutcomes])
 
   const workspaceTabs = useMemo(() => ([
+    {
+      id: 'agenda',
+      label: 'Today agenda',
+      count: opsStats.marketingAgendaItems,
+      detail: opsStats.marketingAgendaWaiting
+        ? `${opsStats.marketingAgendaWaiting} waiting`
+        : `${opsStats.marketingAgendaReadyItems} ready`,
+      tone: opsStats.marketingAgendaWaiting ? '#ffd54f' : '#00e676',
+    },
     {
       id: 'drafts',
       label: 'Draft review',
@@ -376,6 +392,17 @@ export default function CampaignDashboard() {
         console.error('Failed to fetch native video jobs:', err)
       } finally {
         setNativeVideoLoading(false)
+      }
+      setAgendaLoading(true)
+      try {
+        const res7 = await fetch(`${MARKETING_API}/marketing-agenda/today`, { headers: adminHeaders })
+        if (!res7.ok) throw new Error(`${res7.status}`)
+        const json7 = await res7.json()
+        setMarketingAgenda(json7)
+      } catch (err) {
+        console.error('Failed to fetch marketing agenda:', err)
+      } finally {
+        setAgendaLoading(false)
       }
     }
   }, [activeChannel])
@@ -1021,6 +1048,158 @@ export default function CampaignDashboard() {
     }
   }
 
+  const replaceAgendaRun = (run) => {
+    setAgendaRuns(map => ({ ...map, [run.run_id]: run }))
+  }
+
+  const handleComposeMarketingAgenda = async (forceRefresh = false) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Marketing agenda requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setAgendaActionLoading('compose')
+    setAgendaLoading(true)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/marketing-agenda/compose`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({ force_refresh: forceRefresh }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const agenda = await res.json()
+      setMarketingAgenda(agenda)
+      setWorkspace('agenda')
+      setActionSuccess(forceRefresh ? 'Fresh marketing agenda composed.' : 'Marketing agenda loaded.')
+      setTimeout(() => setActionSuccess(null), 4000)
+    } catch (err) {
+      setActionError(`Marketing agenda failed: ${err.message}`)
+      throw err
+    } finally {
+      setAgendaLoading(false)
+      setAgendaActionLoading(null)
+    }
+  }
+
+  const patchMarketingAgendaItemRun = (itemId, runId, status) => {
+    setMarketingAgenda(agenda => {
+      if (!agenda) return agenda
+      return {
+        ...agenda,
+        items: (agenda.items || []).map(item => (
+          item.agenda_item_id === itemId
+            ? { ...item, active_run_id: runId, status: status || item.status }
+            : item
+        )),
+      }
+    })
+  }
+
+  const handleApproveAgendaItem = async (item) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Marketing agenda approval requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setAgendaActionLoading(`approve:${item.agenda_item_id}`)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/marketing-agenda/items/${item.agenda_item_id}/approve`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          agenda_id: marketingAgenda?.agenda_id,
+          approval_scope: 'run_until_attended_gate',
+          approved_by: 'carlos',
+        }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const run = await res.json()
+      replaceAgendaRun(run)
+      patchMarketingAgendaItemRun(item.agenda_item_id, run.run_id, run.status === 'waiting_for_carlos' ? 'waiting_for_carlos' : 'running')
+      setActionSuccess(`Workflow started: ${run.workflow_title}`)
+      setTimeout(() => setActionSuccess(null), 5000)
+    } catch (err) {
+      setActionError(`Agenda workflow failed: ${err.message}`)
+      throw err
+    } finally {
+      setAgendaActionLoading(null)
+    }
+  }
+
+  const handleLoadAgendaRun = async (runId) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Marketing agenda run load requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setAgendaActionLoading(`load:${runId}`)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/marketing-agenda/runs/${runId}`, { headers: adminHeaders })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      replaceAgendaRun(await res.json())
+    } catch (err) {
+      setActionError(`Agenda run load failed: ${err.message}`)
+      throw err
+    } finally {
+      setAgendaActionLoading(null)
+    }
+  }
+
+  const handleRunNextAgendaStep = async (runId) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Marketing agenda run requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setAgendaActionLoading(`run:${runId}`)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/marketing-agenda/runs/${runId}/run-next-step`, {
+        method: 'POST',
+        headers: adminHeaders,
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const run = await res.json()
+      replaceAgendaRun(run)
+      setActionSuccess(`Workflow advanced: ${run.current_step_id || run.status}`)
+      setTimeout(() => setActionSuccess(null), 4000)
+    } catch (err) {
+      setActionError(`Agenda step failed: ${err.message}`)
+      throw err
+    } finally {
+      setAgendaActionLoading(null)
+    }
+  }
+
+  const handleRecordAgendaDecision = async (runId, stepId, decision, operatorNotes) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Marketing agenda decision requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setAgendaActionLoading(`decision:${runId}`)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/marketing-agenda/runs/${runId}/operator-decision`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          step_id: stepId,
+          decision,
+          operator_notes: operatorNotes || undefined,
+        }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const run = await res.json()
+      replaceAgendaRun(run)
+      setActionSuccess(`Agenda decision recorded: ${decision}`)
+      setTimeout(() => setActionSuccess(null), 4000)
+    } catch (err) {
+      setActionError(`Agenda decision failed: ${err.message}`)
+      throw err
+    } finally {
+      setAgendaActionLoading(null)
+    }
+  }
+
   const handleCopyManual = async (campaign) => {
     const text = campaign.message || campaign.generated_copy || ''
     try {
@@ -1071,6 +1250,21 @@ export default function CampaignDashboard() {
       <NextBestActionPanel stats={opsStats} />
 
       <WorkspaceTabs tabs={workspaceTabs} activeWorkspace={workspace} onSelectWorkspace={setWorkspace} />
+
+      {workspace === 'agenda' && (
+        <TodayAgendaWorkspace
+          agenda={marketingAgenda}
+          agendaLoading={agendaLoading}
+          agendaRuns={agendaRuns}
+          hasAdminKey={HAS_MARKETING_ADMIN_KEY}
+          onComposeAgenda={handleComposeMarketingAgenda}
+          onApproveItem={handleApproveAgendaItem}
+          onLoadRun={handleLoadAgendaRun}
+          onRunNextStep={handleRunNextAgendaStep}
+          onRecordDecision={handleRecordAgendaDecision}
+          actionLoading={agendaActionLoading}
+        />
+      )}
 
       {workspace === 'drafts' && (
         <DraftReviewWorkspace
