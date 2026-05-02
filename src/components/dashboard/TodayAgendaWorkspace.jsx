@@ -2,6 +2,11 @@ import { useMemo, useState } from 'react'
 
 const MONO_FONT = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
 const SANS_FONT = "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
+const SHARE_STAGE_READY_STATUSES = new Set([
+  'staged_for_operator_review',
+  'submitted_visible_or_feed',
+  'pending_admin_approval',
+])
 
 function buttonStyle({ tone = '#00e676', filled = false, disabled = false } = {}) {
   return {
@@ -40,6 +45,8 @@ function statusTone(status) {
   if (status === 'completed') return '#00e676'
   if (status === 'blocked' || status === 'changes_requested') return '#ff4444'
   if (status === 'waiting_for_carlos' || status === 'needs_carlos') return '#ffd54f'
+  if (status === 'approved_for_attended_share') return '#ffd54f'
+  if (status === 'staged_for_operator_review') return '#00e676'
   if (status === 'running') return '#4da3ff'
   return '#8abf8a'
 }
@@ -195,12 +202,13 @@ function gateEvidenceState(run, activeGate, campaigns) {
   }
   if (gateId === 'click_post') {
     const stageResult = stepResult(run, 'stage_personal_share')
-    const stagedCount = Number(stageResult?.staged_count || 0)
+    const outcomes = Array.isArray(stageResult?.share_outcomes) ? stageResult.share_outcomes : []
+    const stagedCount = outcomes.filter(outcome => SHARE_STAGE_READY_STATUSES.has(outcome.status)).length
     return {
       blocked: stagedCount < 1,
       message: stagedCount > 0
         ? ''
-        : 'A browser staging handoff with a share outcome is required before Carlos can click Post.',
+        : 'The handoff is prepared, but the Facebook composer has not been staged yet. Run the desktop browser agent and mark the share outcome staged_for_operator_review before approving Post.',
     }
   }
   return { blocked: false, message: '' }
@@ -485,17 +493,25 @@ function DistributionGateReview({ run }) {
 function PersonalShareStageReview({ run }) {
   const stage = stepResult(run, 'stage_personal_share')
   const outcomes = Array.isArray(stage?.share_outcomes) ? stage.share_outcomes : []
+  const stagedCount = outcomes.filter(outcome => SHARE_STAGE_READY_STATUSES.has(outcome.status)).length
   return (
     <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
       <div>
-        <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Browser staging handoff</div>
+        <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Browser handoff and staging status</div>
         <div style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700, marginTop: '4px' }}>
-          {outcomes.length ? `${outcomes.length} attended share target${outcomes.length === 1 ? '' : 's'} prepared` : 'No browser staging artifact prepared yet'}
+          {outcomes.length
+            ? `${outcomes.length} attended share target${outcomes.length === 1 ? '' : 's'} prepared, ${stagedCount} staged in Facebook`
+            : 'No browser staging artifact prepared yet'}
         </div>
       </div>
       <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
-        The browser agent may open Facebook, find the approved group share surface, and fill the note. It must stop before Post. Carlos clicks Post only after reviewing destination, identity, and copy.
+        Prepared means the system created the runbook. Staged means a browser-capable agent actually filled the Facebook composer and stopped before Post. Carlos clicks Post only after reviewing destination, identity, and copy.
       </div>
+      {outcomes.length > 0 && stagedCount === 0 && (
+        <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#2a2100', color: '#ffe58a', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
+          This is only a handoff. Step 9 stays blocked until the share outcome status is staged_for_operator_review.
+        </div>
+      )}
       {!outcomes.length && (
         <div style={{ border: '1px solid #ff4444', borderRadius: '6px', background: '#260707', color: '#ffb3b3', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
           This run is missing the staging result. Return to the safe staging step or ask Codex to repair this workflow run before approving Post.
@@ -521,6 +537,14 @@ function PersonalShareStageReview({ run }) {
               <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Desktop bridge command</div>
               <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#e0ffe0', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
                 {outcome.desktop_bridge_command}
+              </pre>
+            </div>
+          )}
+          {outcome.share_outcome_id && outcome.status !== 'staged_for_operator_review' && (
+            <div style={{ display: 'grid', gap: '5px' }}>
+              <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Mark staged after browser composer is filled</div>
+              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#e0ffe0', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
+                {`python scripts/group_share_bridge.py update ${outcome.share_outcome_id} --status staged_for_operator_review --notes "Facebook composer staged for Carlos review"`}
               </pre>
             </div>
           )}

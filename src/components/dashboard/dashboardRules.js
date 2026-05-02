@@ -169,7 +169,7 @@ export function buildOpsStats({
   )).length
   const allPageAnchors = published.filter(isAnymalPageAnchor)
   const shareOutcomesInFlight = Number(shareOutcomeSummary.in_flight || shareOutcomes.filter(outcome => (
-    ['queued', 'approved_for_attended_share', 'running'].includes(outcome.status)
+    ['queued', 'approved_for_attended_share', 'staged_for_operator_review', 'running'].includes(outcome.status)
   )).length)
   const shareOutcomesSubmitted = Number(shareOutcomeSummary.submitted || shareOutcomes.filter(outcome => (
     ['submitted_visible_or_feed', 'pending_admin_approval'].includes(outcome.status)
