@@ -126,6 +126,70 @@ function AgendaItemCard({ item, active, onSelect }) {
   )
 }
 
+function rowsForZip(campaigns = [], zip) {
+  const normalizedZip = String(zip || '').padStart(5, '0')
+  if (!/^\d{5}$/.test(normalizedZip)) return []
+  return (campaigns || [])
+    .filter(campaign => String(campaign?.zip || '').padStart(5, '0') === normalizedZip)
+    .sort((a, b) => {
+      const aPage = a.channel === 'facebook_page' ? 0 : 1
+      const bPage = b.channel === 'facebook_page' ? 0 : 1
+      if (aPage !== bPage) return aPage - bPage
+      return String(a.channel || '').localeCompare(String(b.channel || ''))
+    })
+}
+
+function facebookPageCampaign(campaigns = [], zip) {
+  return rowsForZip(campaigns, zip).find(campaign => campaign.channel === 'facebook_page') || null
+}
+
+function pageAnchorEvidence(campaign) {
+  const postUrl = campaign?.posted_url || campaign?.page_anchor_post_url || ''
+  const postId = campaign?.post_id || campaign?.facebook_post_id || campaign?.page_anchor_post_id || ''
+  return {
+    postUrl,
+    postId,
+    ready: campaign?.status === 'published' && Boolean(postUrl && postId),
+  }
+}
+
+function stepResult(run, stepId) {
+  return (run?.steps || []).find(step => step.step_id === stepId)?.result || null
+}
+
+function gateEvidenceState(run, activeGate, campaigns) {
+  const zip = run?.linked_entities?.zip
+  const gateId = activeGate?.step_id
+  if (gateId === 'review_launch_package') {
+    const rows = rowsForZip(campaigns, zip)
+    return {
+      blocked: rows.length === 0,
+      message: rows.length === 0 ? 'Generated draft assets are not loaded yet. Refresh before approving the package.' : '',
+    }
+  }
+  if (gateId === 'approve_page_anchor_in_draft_review') {
+    const campaign = facebookPageCampaign(campaigns, zip)
+    const evidence = pageAnchorEvidence(campaign)
+    return {
+      blocked: !evidence.ready,
+      message: evidence.ready
+        ? ''
+        : 'A published Facebook Page anchor with posted_url and post_id is required before this gate can pass.',
+    }
+  }
+  if (gateId === 'approve_distribution_targets') {
+    const composeResult = stepResult(run, 'compose_distribution_plan')
+    const targetCount = Number(composeResult?.target_count || 0)
+    return {
+      blocked: !composeResult?.plan_id || targetCount < 1,
+      message: composeResult?.plan_id && targetCount > 0
+        ? ''
+        : 'A composed distribution plan with target groups is required before approving targets.',
+    }
+  }
+  return { blocked: false, message: '' }
+}
+
 function RunControls({
   run,
   activeGate,
@@ -137,6 +201,8 @@ function RunControls({
   const [notes, setNotes] = useState('')
   const stepId = activeGate?.step_id || run?.current_step_id || ''
   const isLoading = actionLoading === `run:${run?.run_id}` || actionLoading === `decision:${run?.run_id}`
+  const gateEvidence = gateEvidenceState(run, activeGate, launchPackageCampaigns)
+  const positiveDecisionDisabled = isLoading || !stepId || gateEvidence.blocked
 
   if (!run) return null
 
@@ -162,6 +228,20 @@ function RunControls({
         <LaunchPackageReview campaigns={launchPackageCampaigns} zip={run?.linked_entities?.zip} />
       )}
 
+      {activeGate?.step_id === 'approve_page_anchor_in_draft_review' && (
+        <PageAnchorGateReview campaigns={launchPackageCampaigns} zip={run?.linked_entities?.zip} />
+      )}
+
+      {activeGate?.step_id === 'approve_distribution_targets' && (
+        <DistributionGateReview run={run} />
+      )}
+
+      {gateEvidence.blocked && (
+        <div style={{ border: '1px solid #ff4444', borderRadius: '6px', background: '#260707', color: '#ffb3b3', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
+          {gateEvidence.message}
+        </div>
+      )}
+
       <textarea
         value={notes}
         onChange={event => setNotes(event.target.value)}
@@ -172,10 +252,10 @@ function RunControls({
         <button type="button" onClick={() => onRunNextStep(run.run_id)} disabled={isLoading || run.status !== 'running'} style={buttonStyle({ disabled: isLoading || run.status !== 'running' })}>
           Run safe next step
         </button>
-        <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'approved', notes)} disabled={isLoading || !stepId} style={buttonStyle({ filled: true, disabled: isLoading || !stepId })}>
+        <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'approved', notes)} disabled={positiveDecisionDisabled} style={buttonStyle({ filled: true, disabled: positiveDecisionDisabled })}>
           {activeGate?.step_id === 'review_launch_package' ? 'Approve package' : 'Approve gate'}
         </button>
-        <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'completed', notes)} disabled={isLoading || !stepId} style={buttonStyle({ disabled: isLoading || !stepId })}>
+        <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'completed', notes)} disabled={positiveDecisionDisabled} style={buttonStyle({ disabled: positiveDecisionDisabled })}>
           Mark done
         </button>
         <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'changes_requested', notes)} disabled={isLoading || !stepId} style={buttonStyle({ tone: '#ffd54f', disabled: isLoading || !stepId })}>
@@ -190,14 +270,7 @@ function RunControls({
 }
 
 function LaunchPackageReview({ campaigns = [], zip }) {
-  const rows = (campaigns || [])
-    .filter(campaign => String(campaign?.zip || '').padStart(5, '0') === String(zip || '').padStart(5, '0'))
-    .sort((a, b) => {
-      const aPage = a.channel === 'facebook_page' ? 0 : 1
-      const bPage = b.channel === 'facebook_page' ? 0 : 1
-      if (aPage !== bPage) return aPage - bPage
-      return String(a.channel || '').localeCompare(String(b.channel || ''))
-    })
+  const rows = rowsForZip(campaigns, zip)
   const pageDraft = rows.find(campaign => campaign.channel === 'facebook_page')
   return (
     <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
@@ -238,6 +311,90 @@ function LaunchPackageReview({ campaigns = [], zip }) {
           </article>
         )
       })}
+    </section>
+  )
+}
+
+function PageAnchorGateReview({ campaigns = [], zip }) {
+  const pageCampaign = facebookPageCampaign(campaigns, zip)
+  const evidence = pageAnchorEvidence(pageCampaign)
+  const copy = pageCampaign?.message || pageCampaign?.generated_copy || ''
+  return (
+    <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', alignItems: 'start' }}>
+        <div>
+          <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Page anchor evidence required</div>
+          <div style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700, marginTop: '4px' }}>
+            {pageCampaign ? `Facebook Page campaign for ZIP ${zip}` : `No Facebook Page campaign loaded for ZIP ${zip}`}
+          </div>
+        </div>
+        {pageCampaign && (
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <StatusPill tone={statusTone(pageCampaign.status)}>{pageCampaign.status || 'draft'}</StatusPill>
+            {pageCampaign.creative_status && <StatusPill tone={pageCampaign.creative_status === 'creative_current' ? '#00e676' : '#ffd54f'}>{pageCampaign.creative_status}</StatusPill>}
+            <StatusPill tone={evidence.ready ? '#00e676' : '#ff4444'}>{evidence.ready ? 'anchor verified' : 'anchor missing'}</StatusPill>
+          </div>
+        )}
+      </div>
+      <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
+        This gate means the Page post has already been reviewed and published from Draft Review. It cannot be approved from the agenda until the campaign has both a posted URL and a post ID.
+      </div>
+      {pageCampaign && (
+        <article style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '10px', display: 'grid', gap: '7px' }}>
+          <div style={{ color: '#4a7a5a', fontSize: '10px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>{pageCampaign.campaign_id}</div>
+          {copy && (
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#c8f7c8', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
+              {copy}
+            </pre>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: '8px' }}>
+            <div style={{ color: evidence.postUrl ? '#8abf8a' : '#ffb3b3', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>
+              posted_url: {evidence.postUrl || 'missing'}
+            </div>
+            <div style={{ color: evidence.postId ? '#8abf8a' : '#ffb3b3', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>
+              post_id: {evidence.postId || 'missing'}
+            </div>
+          </div>
+        </article>
+      )}
+      {!evidence.ready && (
+        <div style={{ color: '#ffd54f', fontSize: '12px', lineHeight: 1.45 }}>
+          Next action: open Draft Review for this ZIP, generate or regenerate creative if needed, then approve the Facebook Page draft. Return here after the Page post has a posted URL and post ID.
+        </div>
+      )}
+    </section>
+  )
+}
+
+function DistributionGateReview({ run }) {
+  const composeResult = stepResult(run, 'compose_distribution_plan')
+  const targetCount = Number(composeResult?.target_count || 0)
+  return (
+    <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
+      <div>
+        <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Distribution plan evidence required</div>
+        <div style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700, marginTop: '4px' }}>
+          {composeResult?.plan_id ? `Plan ${composeResult.plan_id}` : 'No composed distribution plan on this run'}
+        </div>
+      </div>
+      <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
+        Approving this gate only approves the target list for later attended sharing. It does not stage a browser, post, share, comment, like, or follow.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: '8px' }}>
+        <div style={{ border: '1px solid #1a3a2a', borderRadius: '5px', padding: '9px' }}>
+          <div style={{ color: '#4a7a5a', fontSize: '10px', textTransform: 'uppercase' }}>Targets</div>
+          <div style={{ color: targetCount > 0 ? '#00e676' : '#ff4444', fontSize: '18px', fontWeight: 700 }}>{targetCount}</div>
+        </div>
+        <div style={{ border: '1px solid #1a3a2a', borderRadius: '5px', padding: '9px' }}>
+          <div style={{ color: '#4a7a5a', fontSize: '10px', textTransform: 'uppercase' }}>Campaign</div>
+          <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>{composeResult?.campaign_id || 'missing'}</div>
+        </div>
+      </div>
+      {!composeResult?.plan_id && (
+        <div style={{ color: '#ffd54f', fontSize: '12px', lineHeight: 1.45 }}>
+          Run the safe compose step after Page anchor verification. The backend will block if the anchor is missing.
+        </div>
+      )}
     </section>
   )
 }

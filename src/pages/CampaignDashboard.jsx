@@ -1171,6 +1171,7 @@ export default function CampaignDashboard() {
       if (!res.ok) throw new Error(await readErrorDetail(res))
       const run = await res.json()
       replaceAgendaRun(run)
+      await fetchData()
       setActionSuccess(`Workflow advanced: ${run.current_step_id || run.status}`)
       setTimeout(() => setActionSuccess(null), 4000)
     } catch (err) {
@@ -1201,6 +1202,7 @@ export default function CampaignDashboard() {
       if (!res.ok) throw new Error(await readErrorDetail(res))
       const run = await res.json()
       replaceAgendaRun(run)
+      await fetchData()
       setActionSuccess(`Agenda decision recorded: ${decision}`)
       setTimeout(() => setActionSuccess(null), 4000)
     } catch (err) {
