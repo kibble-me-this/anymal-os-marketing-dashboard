@@ -475,12 +475,7 @@ export default function CampaignDashboard() {
     try {
       const res = await fetch(`${MARKETING_API}/campaigns/${campaignId}/approve`, { method: 'POST', headers })
       if (!res.ok) {
-        let detail = `${res.status}`
-        try {
-          const body = await res.json()
-          if (body?.detail) detail = body.detail
-        } catch { /* no-op */ }
-        throw new Error(detail)
+        throw new Error(await readErrorDetail(res))
       }
       setActionSuccess(`Published: ${campaignId}`)
       setTimeout(() => setActionSuccess(null), 4000)
