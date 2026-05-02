@@ -7,6 +7,10 @@ const SHARE_STAGE_READY_STATUSES = new Set([
   'submitted_visible_or_feed',
   'pending_admin_approval',
 ])
+const SHARE_STAGING_ACTIVE_STATUSES = new Set([
+  'staging_requested',
+  'staging_in_progress',
+])
 
 function buttonStyle({ tone = '#00e676', filled = false, disabled = false } = {}) {
   return {
@@ -46,7 +50,9 @@ function statusTone(status) {
   if (status === 'blocked' || status === 'changes_requested') return '#ff4444'
   if (status === 'waiting_for_carlos' || status === 'needs_carlos') return '#ffd54f'
   if (status === 'approved_for_attended_share') return '#ffd54f'
+  if (SHARE_STAGING_ACTIVE_STATUSES.has(status)) return '#4da3ff'
   if (status === 'staged_for_operator_review') return '#00e676'
+  if (status === 'staging_failed') return '#ff4444'
   if (status === 'running') return '#4da3ff'
   return '#8abf8a'
 }
@@ -208,7 +214,7 @@ function gateEvidenceState(run, activeGate, campaigns) {
       blocked: stagedCount < 1,
       message: stagedCount > 0
         ? ''
-        : 'The handoff is prepared, but the Facebook composer has not been staged yet. Run the desktop browser agent and mark the share outcome staged_for_operator_review before approving Post.',
+        : 'The Facebook composer has not been staged yet. Request browser staging, then wait for the local desktop runner to mark the share staged_for_operator_review before approving Post.',
     }
   }
   return { blocked: false, message: '' }
@@ -223,7 +229,9 @@ function RunControls({
   onOpenDraftReview,
   onRunNextStep,
   onRecordDecision,
+  onRequestShareStaging,
   actionLoading,
+  shareOutcomeActionLoading,
 }) {
   const [notes, setNotes] = useState('')
   const stepId = activeGate?.step_id || run?.current_step_id || ''
@@ -270,7 +278,11 @@ function RunControls({
       )}
 
       {(activeGate?.step_id === 'stage_personal_share' || activeGate?.step_id === 'click_post') && (
-        <PersonalShareStageReview run={run} />
+        <PersonalShareStageReview
+          run={run}
+          onRequestShareStaging={onRequestShareStaging}
+          shareOutcomeActionLoading={shareOutcomeActionLoading}
+        />
       )}
 
       {gateEvidence.blocked && (
@@ -490,26 +502,27 @@ function DistributionGateReview({ run }) {
   )
 }
 
-function PersonalShareStageReview({ run }) {
+function PersonalShareStageReview({ run, onRequestShareStaging, shareOutcomeActionLoading }) {
   const stage = stepResult(run, 'stage_personal_share')
   const outcomes = Array.isArray(stage?.share_outcomes) ? stage.share_outcomes : []
   const stagedCount = outcomes.filter(outcome => SHARE_STAGE_READY_STATUSES.has(outcome.status)).length
+  const requestedCount = outcomes.filter(outcome => SHARE_STAGING_ACTIVE_STATUSES.has(outcome.status)).length
   return (
     <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
       <div>
         <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Browser handoff and staging status</div>
         <div style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700, marginTop: '4px' }}>
           {outcomes.length
-            ? `${outcomes.length} attended share target${outcomes.length === 1 ? '' : 's'} prepared, ${stagedCount} staged in Facebook`
+            ? `${outcomes.length} attended share target${outcomes.length === 1 ? '' : 's'} prepared, ${requestedCount} requested, ${stagedCount} staged in Facebook`
             : 'No browser staging artifact prepared yet'}
         </div>
       </div>
       <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
-        Prepared means the system created the runbook. Staged means a browser-capable agent actually filled the Facebook composer and stopped before Post. Carlos clicks Post only after reviewing destination, identity, and copy.
+        Request staging here. The local desktop runner opens the browser-capable agent, fills the Facebook composer, and stops before Post. Carlos clicks Post only after reviewing destination, identity, and copy.
       </div>
       {outcomes.length > 0 && stagedCount === 0 && (
         <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#2a2100', color: '#ffe58a', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
-          This is only a handoff. Step 9 stays blocked until the share outcome status is staged_for_operator_review.
+          Step 9 stays blocked until the browser runner changes the share outcome to staged_for_operator_review.
         </div>
       )}
       {!outcomes.length && (
@@ -532,20 +545,19 @@ function PersonalShareStageReview({ run }) {
               {outcome.share_note}
             </pre>
           )}
-          {outcome.desktop_bridge_command && (
-            <div style={{ display: 'grid', gap: '5px' }}>
-              <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Desktop bridge command</div>
-              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#e0ffe0', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
-                {outcome.desktop_bridge_command}
-              </pre>
-            </div>
-          )}
-          {outcome.share_outcome_id && outcome.status !== 'staged_for_operator_review' && (
-            <div style={{ display: 'grid', gap: '5px' }}>
-              <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Mark staged after browser composer is filled</div>
-              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#e0ffe0', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
-                {`python scripts/group_share_bridge.py update ${outcome.share_outcome_id} --status staged_for_operator_review --notes "Facebook composer staged for Carlos review"`}
-              </pre>
+          {outcome.share_outcome_id && !SHARE_STAGE_READY_STATUSES.has(outcome.status) && (
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={() => onRequestShareStaging?.(outcome.share_outcome_id)}
+                disabled={!onRequestShareStaging || shareOutcomeActionLoading === outcome.share_outcome_id || SHARE_STAGING_ACTIVE_STATUSES.has(outcome.status)}
+                style={buttonStyle({ filled: true, disabled: !onRequestShareStaging || shareOutcomeActionLoading === outcome.share_outcome_id || SHARE_STAGING_ACTIVE_STATUSES.has(outcome.status) })}
+              >
+                {SHARE_STAGING_ACTIVE_STATUSES.has(outcome.status) ? 'Staging requested' : 'Request browser staging'}
+              </button>
+              <span style={{ color: '#8abf8a', fontSize: '11px', lineHeight: 1.35 }}>
+                The desktop runner will stage the Facebook composer and stop before Post.
+              </span>
             </div>
           )}
           {Array.isArray(outcome.instructions) && outcome.instructions.length > 0 && (
@@ -640,8 +652,10 @@ export default function TodayAgendaWorkspace({
   onGenerateCreative,
   onRunNextStep,
   onRecordDecision,
+  onRequestShareStaging,
   zipLoading,
   actionLoading,
+  shareOutcomeActionLoading,
 }) {
   const items = useMemo(() => agenda?.items || [], [agenda])
   const [selectedItemId, setSelectedItemId] = useState('')
@@ -851,7 +865,9 @@ export default function TodayAgendaWorkspace({
                 onOpenDraftReview={onOpenDraftReview}
                 onRunNextStep={onRunNextStep}
                 onRecordDecision={onRecordDecision}
+                onRequestShareStaging={onRequestShareStaging}
                 actionLoading={actionLoading}
+                shareOutcomeActionLoading={shareOutcomeActionLoading}
               />
             )}
           </main>

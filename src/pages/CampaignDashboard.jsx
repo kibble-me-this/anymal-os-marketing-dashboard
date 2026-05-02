@@ -1013,6 +1013,23 @@ export default function CampaignDashboard() {
     )))
   }
 
+  const refreshLoadedAgendaRuns = async () => {
+    const runIds = Object.keys(agendaRuns || {})
+    if (!runIds.length) return
+    const runs = await Promise.all(runIds.map(async (runId) => {
+      const res = await fetch(`${MARKETING_API}/marketing-agenda/runs/${runId}`, { headers: adminHeaders })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      return res.json()
+    }))
+    setAgendaRuns(map => {
+      const next = { ...map }
+      runs.forEach(run => {
+        next[run.run_id] = run
+      })
+      return next
+    })
+  }
+
   const handleUpdateShareOutcome = async (shareOutcomeId, payload) => {
     if (!HAS_MARKETING_ADMIN_KEY) {
       setActionError('Outcome updates require VITE_MARKETING_ADMIN_KEY.')
@@ -1032,12 +1049,23 @@ export default function CampaignDashboard() {
       setActionSuccess(`Share outcome updated: ${outcome.group_name || shareOutcomeId}`)
       setTimeout(() => setActionSuccess(null), 4000)
       await fetchData()
+      await refreshLoadedAgendaRuns()
     } catch (err) {
       setActionError(`Outcome update failed: ${err.message}`)
       throw err
     } finally {
       setOutcomeActionLoading(null)
     }
+  }
+
+  const handleRequestShareStaging = async (shareOutcomeId) => {
+    await handleUpdateShareOutcome(shareOutcomeId, {
+      status: 'staging_requested',
+      status_reason: 'dashboard_requested_browser_staging',
+      operator_notes: 'Carlos requested browser staging from the marketing agenda.',
+    })
+    setActionSuccess('Browser staging requested. The local desktop runner will stage the Facebook composer and stop before Post.')
+    setTimeout(() => setActionSuccess(null), 5000)
   }
 
   const replaceNativeVideoJob = (updatedJob) => {
@@ -1358,8 +1386,10 @@ export default function CampaignDashboard() {
           onGenerateCreative={handleGenerateAndAttachCreative}
           onRunNextStep={handleRunNextAgendaStep}
           onRecordDecision={handleRecordAgendaDecision}
+          onRequestShareStaging={handleRequestShareStaging}
           zipLoading={zipLoading}
           actionLoading={agendaActionLoading}
+          shareOutcomeActionLoading={outcomeActionLoading}
         />
       )}
 
