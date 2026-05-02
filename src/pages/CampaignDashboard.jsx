@@ -628,6 +628,51 @@ export default function CampaignDashboard() {
     }
   }
 
+  const handleGenerateAndAttachCreative = async (zip) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Creative generation requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    const normalizedZip = String(zip || '').padStart(5, '0')
+    setZipLoadingPhase(normalizedZip, 'generating')
+    setActionError(null)
+    setZipErrors(errors => {
+      const next = { ...errors }
+      delete next[normalizedZip]
+      return next
+    })
+    try {
+      const asset = await callAdminPost(`/campaigns/creative/generate?zip=${normalizedZip}&template_id=${CREATIVE_TEMPLATE_ID}`)
+      const creativeMetadata = creativeMetadataFromAsset(asset)
+      setZipLoadingPhase(normalizedZip, 'attaching')
+      const body = await callAdminPost(`/campaigns/zip-local/generate?zip=${normalizedZip}`)
+      setZipCreativeOverrides(map => ({
+        ...map,
+        [normalizedZip]: {
+          creativeMetadata: body.creative_metadata || creativeMetadata,
+          creativeStatus: body.creative_status || creativeMetadata?.creative_status || 'creative_current',
+          needsRefresh: false,
+        },
+      }))
+      await fetchData()
+      setActionSuccess(`Creative generated and attached for ZIP ${normalizedZip}. Open Draft Review to inspect the Page draft.`)
+      setTimeout(() => setActionSuccess(null), 5000)
+    } catch (err) {
+      setZipErrors(errors => ({ ...errors, [normalizedZip]: err.detail || { error: err.message } }))
+      setActionError(`Creative preparation failed for ZIP ${normalizedZip}: ${err.message}`)
+    } finally {
+      clearZipLoadingPhase(normalizedZip)
+    }
+  }
+
+  const handleOpenDraftReviewForZip = (zip) => {
+    const normalizedZip = String(zip || '').padStart(5, '0')
+    setWorkspace('drafts')
+    setActiveChannel('all')
+    setActionSuccess(`Draft Review opened. Select ZIP ${normalizedZip} to inspect the Page draft.`)
+    setTimeout(() => setActionSuccess(null), 5000)
+  }
+
   const handleTargetGroupChange = (index, field, value) => {
     setTargetGroups(groups => groups.map((group, i) => {
       if (i !== index) return group
@@ -1314,8 +1359,11 @@ export default function CampaignDashboard() {
           onComposeAgenda={handleComposeMarketingAgenda}
           onApproveItem={handleApproveAgendaItem}
           onLoadRun={handleLoadAgendaRun}
+          onOpenDraftReview={handleOpenDraftReviewForZip}
+          onGenerateCreative={handleGenerateAndAttachCreative}
           onRunNextStep={handleRunNextAgendaStep}
           onRecordDecision={handleRecordAgendaDecision}
+          zipLoading={zipLoading}
           actionLoading={agendaActionLoading}
         />
       )}

@@ -194,6 +194,9 @@ function RunControls({
   run,
   activeGate,
   launchPackageCampaigns,
+  zipLoading,
+  onGenerateCreative,
+  onOpenDraftReview,
   onRunNextStep,
   onRecordDecision,
   actionLoading,
@@ -229,7 +232,13 @@ function RunControls({
       )}
 
       {activeGate?.step_id === 'approve_page_anchor_in_draft_review' && (
-        <PageAnchorGateReview campaigns={launchPackageCampaigns} zip={run?.linked_entities?.zip} />
+        <PageAnchorGateReview
+          campaigns={launchPackageCampaigns}
+          zip={run?.linked_entities?.zip}
+          zipLoading={zipLoading}
+          onGenerateCreative={onGenerateCreative}
+          onOpenDraftReview={onOpenDraftReview}
+        />
       )}
 
       {activeGate?.step_id === 'approve_distribution_targets' && (
@@ -315,10 +324,13 @@ function LaunchPackageReview({ campaigns = [], zip }) {
   )
 }
 
-function PageAnchorGateReview({ campaigns = [], zip }) {
+function PageAnchorGateReview({ campaigns = [], zip, zipLoading = {}, onGenerateCreative, onOpenDraftReview }) {
   const pageCampaign = facebookPageCampaign(campaigns, zip)
   const evidence = pageAnchorEvidence(pageCampaign)
   const copy = pageCampaign?.message || pageCampaign?.generated_copy || ''
+  const creativeReady = pageCampaign?.creative_status === 'creative_current' || Boolean(pageCampaign?.creative_metadata?.image_url || pageCampaign?.creative_asset_id)
+  const loadingPhase = zipLoading?.[String(zip || '').padStart(5, '0')] || ''
+  const creativeLoading = Boolean(loadingPhase)
   return (
     <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', alignItems: 'start' }}>
@@ -339,6 +351,35 @@ function PageAnchorGateReview({ campaigns = [], zip }) {
       <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
         This gate means the Page post has already been reviewed and published from Draft Review. It cannot be approved from the agenda until the campaign has both a posted URL and a post ID.
       </div>
+      {pageCampaign && !creativeReady && (
+        <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', padding: '10px', display: 'grid', gap: '8px' }}>
+          <div style={{ color: '#ffd54f', fontSize: '12px', fontWeight: 700 }}>Creative is required before this Page draft can become the Page anchor.</div>
+          <div style={{ color: '#ffe9a6', fontSize: '12px', lineHeight: 1.45 }}>
+            Generate and attach the ZIP creative here, then open Draft Review to inspect the final Facebook Page draft before publishing.
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => onGenerateCreative?.(zip)} disabled={creativeLoading} style={buttonStyle({ filled: true, disabled: creativeLoading })}>
+              {creativeLoading ? loadingPhase : 'Generate and attach creative'}
+            </button>
+            <button type="button" onClick={() => onOpenDraftReview?.(zip)} style={buttonStyle()}>
+              Open Draft Review
+            </button>
+          </div>
+        </div>
+      )}
+      {pageCampaign && creativeReady && !evidence.ready && (
+        <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', padding: '10px', display: 'grid', gap: '8px' }}>
+          <div style={{ color: '#ffd54f', fontSize: '12px', fontWeight: 700 }}>Creative is ready. Carlos still needs to review and publish the Page draft.</div>
+          <div style={{ color: '#ffe9a6', fontSize: '12px', lineHeight: 1.45 }}>
+            Open Draft Review, inspect the Facebook Page draft, and approve it only if you want the Page anchor published externally.
+          </div>
+          <div>
+            <button type="button" onClick={() => onOpenDraftReview?.(zip)} style={buttonStyle({ filled: true })}>
+              Open Draft Review
+            </button>
+          </div>
+        </div>
+      )}
       {pageCampaign && (
         <article style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '10px', display: 'grid', gap: '7px' }}>
           <div style={{ color: '#4a7a5a', fontSize: '10px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>{pageCampaign.campaign_id}</div>
@@ -359,7 +400,7 @@ function PageAnchorGateReview({ campaigns = [], zip }) {
       )}
       {!evidence.ready && (
         <div style={{ color: '#ffd54f', fontSize: '12px', lineHeight: 1.45 }}>
-          Next action: open Draft Review for this ZIP, generate or regenerate creative if needed, then approve the Facebook Page draft. Return here after the Page post has a posted URL and post ID.
+          Next action: finish the Page draft in Draft Review. Return here after the Page post has a posted URL and post ID.
         </div>
       )}
     </section>
@@ -476,8 +517,11 @@ export default function TodayAgendaWorkspace({
   onComposeAgenda,
   onApproveItem,
   onLoadRun,
+  onOpenDraftReview,
+  onGenerateCreative,
   onRunNextStep,
   onRecordDecision,
+  zipLoading,
   actionLoading,
 }) {
   const items = useMemo(() => agenda?.items || [], [agenda])
@@ -683,6 +727,9 @@ export default function TodayAgendaWorkspace({
                 run={activeRun}
                 activeGate={activeGate}
                 launchPackageCampaigns={launchPackageCampaigns}
+                zipLoading={zipLoading}
+                onGenerateCreative={onGenerateCreative}
+                onOpenDraftReview={onOpenDraftReview}
                 onRunNextStep={onRunNextStep}
                 onRecordDecision={onRecordDecision}
                 actionLoading={actionLoading}
