@@ -1052,25 +1052,34 @@ export default function CampaignDashboard() {
     setAgendaRuns(map => ({ ...map, [run.run_id]: run }))
   }
 
-  const handleComposeMarketingAgenda = async (forceRefresh = false) => {
+  const handleComposeMarketingAgenda = async (forceRefresh = false, options = {}) => {
     if (!HAS_MARKETING_ADMIN_KEY) {
       setActionError('Marketing agenda requires VITE_MARKETING_ADMIN_KEY.')
       return
     }
-    setAgendaActionLoading('compose')
+    const loadingKey = options.loadingKey || 'compose'
+    const requestBody = {
+      force_refresh: forceRefresh,
+      ...(options.include_workflow_types ? { include_workflow_types: options.include_workflow_types } : {}),
+      ...(options.candidate_zips ? { candidate_zips: options.candidate_zips } : {}),
+      ...(options.zip_activation_limit ? { zip_activation_limit: options.zip_activation_limit } : {}),
+      ...(options.operator_notes ? { operator_notes: options.operator_notes } : {}),
+    }
+    setAgendaActionLoading(loadingKey)
     setAgendaLoading(true)
     setActionError(null)
     try {
       const res = await fetch(`${MARKETING_API}/marketing-agenda/compose`, {
         method: 'POST',
         headers: adminHeaders,
-        body: JSON.stringify({ force_refresh: forceRefresh }),
+        body: JSON.stringify(requestBody),
       })
       if (!res.ok) throw new Error(await readErrorDetail(res))
       const agenda = await res.json()
       setMarketingAgenda(agenda)
       setWorkspace('agenda')
-      setActionSuccess(forceRefresh ? 'Fresh marketing agenda composed.' : 'Marketing agenda loaded.')
+      const zip = options.candidate_zips?.[0]
+      setActionSuccess(zip ? `ZIP activation workflow composed for ${zip}.` : forceRefresh ? 'Fresh marketing agenda composed.' : 'Marketing agenda loaded.')
       setTimeout(() => setActionSuccess(null), 4000)
     } catch (err) {
       setActionError(`Marketing agenda failed: ${err.message}`)

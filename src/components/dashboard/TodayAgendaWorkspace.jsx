@@ -198,6 +198,7 @@ export default function TodayAgendaWorkspace({
 }) {
   const items = useMemo(() => agenda?.items || [], [agenda])
   const [selectedItemId, setSelectedItemId] = useState('')
+  const [activationZip, setActivationZip] = useState('')
   const selectedItem = useMemo(() => (
     items.find(item => item.agenda_item_id === selectedItemId)
     || items.find(item => item.agenda_item_id === agenda?.primary_item_id)
@@ -209,6 +210,9 @@ export default function TodayAgendaWorkspace({
   const activeGate = activeRun?.attended_gate || null
   const canGo = Boolean(hasAdminKey && selectedItem && selectedItem.status !== 'completed')
   const isApproving = selectedItem && actionLoading === `approve:${selectedItem.agenda_item_id}`
+  const normalizedActivationZip = activationZip.trim()
+  const activationZipValid = /^\d{5}$/.test(normalizedActivationZip)
+  const activationLoading = actionLoading === 'compose:zip'
 
   return (
     <div style={{ display: 'grid', gap: '14px' }}>
@@ -232,6 +236,54 @@ export default function TodayAgendaWorkspace({
             </button>
           </div>
         </div>
+
+        <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#021a0e', padding: '12px', display: 'grid', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: '10px', alignItems: 'end' }}>
+            <label style={{ display: 'grid', gap: '6px' }}>
+              <span style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Activate ZIP</span>
+              <input
+                value={activationZip}
+                onChange={event => setActivationZip(event.target.value.replace(/\D/g, '').slice(0, 5))}
+                placeholder="74105"
+                inputMode="numeric"
+                style={{ width: '100%', boxSizing: 'border-box', background: '#031808', color: '#e0ffe0', border: '1px solid #1a3a2a', borderRadius: '5px', padding: '10px', fontSize: '13px', fontFamily: MONO_FONT }}
+              />
+            </label>
+            <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.4 }}>
+              Compose a ZIP price-intelligence launch workflow. Go verifies the live price page and generates the launch package, then stops for Carlos before Page approval or personal-account sharing.
+            </div>
+            <button
+              type="button"
+              onClick={() => onComposeAgenda(true, {
+                include_workflow_types: ['zip_price_activation'],
+                candidate_zips: [normalizedActivationZip],
+                zip_activation_limit: 1,
+                operator_notes: `Carlos requested ZIP activation for ${normalizedActivationZip}.`,
+                loadingKey: 'compose:zip',
+              })}
+              disabled={!hasAdminKey || !activationZipValid || activationLoading}
+              style={buttonStyle({ filled: true, disabled: !hasAdminKey || !activationZipValid || activationLoading })}
+            >
+              {activationLoading ? 'Composing...' : 'Compose ZIP workflow'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onComposeAgenda(true, {
+                include_workflow_types: ['zip_price_activation'],
+                zip_activation_limit: 1,
+                operator_notes: 'Carlos requested the next eligible ZIP activation.',
+                loadingKey: 'compose:zip',
+              })}
+              disabled={!hasAdminKey || activationLoading}
+              style={buttonStyle({ disabled: !hasAdminKey || activationLoading })}
+            >
+              Find next ZIP
+            </button>
+          </div>
+          {activationZip && !activationZipValid && (
+            <div style={{ color: '#ffd54f', fontSize: '11px' }}>Enter a 5 digit ZIP before composing this workflow.</div>
+          )}
+        </section>
 
         {!hasAdminKey && (
           <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', color: '#ffd54f', padding: '10px', fontSize: '12px' }}>
