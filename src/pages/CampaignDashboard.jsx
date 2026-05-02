@@ -81,7 +81,7 @@ async function readApiError(res) {
     const body = await res.json()
     const detail = body?.detail || body
     if (typeof detail === 'string') return { message: detail, detail: { error: detail } }
-    return { message: detail?.error || detail?.message || `${res.status}`, detail }
+    return { message: detail?.message || detail?.error || `${res.status}`, detail }
   } catch {
     return { message: `${res.status}`, detail: { error: `${res.status}` } }
   }
@@ -199,6 +199,7 @@ export default function CampaignDashboard() {
   const [zipLoading, setZipLoading] = useState({})
   const [zipErrors, setZipErrors] = useState({})
   const intervalRef = useRef(null)
+  const agendaRunHydrationRef = useRef(new Set())
 
   const allCampaigns = useMemo(() => [...pending, ...published], [pending, published])
   const zipOptions = useMemo(() => {
@@ -420,6 +421,45 @@ export default function CampaignDashboard() {
     }, 1000)
     return () => clearInterval(intervalRef.current)
   }, [fetchData])
+
+  useEffect(() => {
+    if (!HAS_MARKETING_ADMIN_KEY) return
+    const hydratingRunIds = agendaRunHydrationRef.current
+    const activeRunIds = (marketingAgenda?.items || [])
+      .map(item => item.active_run_id)
+      .filter(Boolean)
+    const missingRunIds = activeRunIds.filter(runId => (
+      !agendaRuns[runId] && !hydratingRunIds.has(runId)
+    ))
+    if (!missingRunIds.length) return
+
+    let cancelled = false
+    missingRunIds.forEach(runId => hydratingRunIds.add(runId))
+    Promise.all(missingRunIds.map(async (runId) => {
+      const res = await fetch(`${MARKETING_API}/marketing-agenda/runs/${runId}`, { headers: adminHeaders })
+      if (!res.ok) throw new Error(`${runId}: ${await readErrorDetail(res)}`)
+      return res.json()
+    }))
+      .then(runs => {
+        if (cancelled) return
+        setAgendaRuns(map => {
+          const next = { ...map }
+          runs.forEach(run => {
+            next[run.run_id] = run
+          })
+          return next
+        })
+      })
+      .catch(err => {
+        missingRunIds.forEach(runId => hydratingRunIds.delete(runId))
+        console.error('Failed to hydrate agenda runs:', err)
+      })
+
+    return () => {
+      cancelled = true
+      missingRunIds.forEach(runId => hydratingRunIds.delete(runId))
+    }
+  }, [agendaRuns, marketingAgenda])
 
   const handleRequestApprove = (campaign) => {
     setActionError(null)
