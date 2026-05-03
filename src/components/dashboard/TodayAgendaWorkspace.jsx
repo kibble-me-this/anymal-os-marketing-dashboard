@@ -11,6 +11,13 @@ const SHARE_STAGING_ACTIVE_STATUSES = new Set([
   'staging_requested',
   'staging_in_progress',
 ])
+const WORKFLOW_LABELS = {
+  relationship_growth: 'Relationship growth',
+  zip_price_activation: 'ZIP launch',
+  city_launch_amplification: 'City amplification',
+  native_video_review: 'Native video',
+  pending_share_follow_up: 'Share follow-up',
+}
 
 function buttonStyle({ tone = '#00e676', filled = false, disabled = false } = {}) {
   return {
@@ -34,6 +41,37 @@ function StatusPill({ children, tone = '#00e676' }) {
     <span style={{ border: `1px solid ${tone}`, color: tone, borderRadius: '999px', padding: '3px 8px', fontSize: '10px', fontFamily: SANS_FONT, whiteSpace: 'nowrap' }}>
       {children}
     </span>
+  )
+}
+
+function Modal({ title, children, onClose }) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 50,
+        background: 'rgba(0, 0, 0, 0.72)',
+        display: 'grid',
+        placeItems: 'center',
+        padding: '20px',
+      }}
+    >
+      <section style={{ width: 'min(1080px, 100%)', maxHeight: 'calc(100vh - 40px)', overflow: 'auto', border: '1px solid #1a3a2a', borderRadius: '8px', background: '#021a0e', boxShadow: '0 24px 80px rgba(0,0,0,0.45)' }}>
+        <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', padding: '14px', borderBottom: '1px solid #1a3a2a', background: '#031808' }}>
+          <div style={{ color: '#e0ffe0', fontSize: '15px', fontWeight: 700 }}>{title}</div>
+          <button type="button" onClick={onClose} style={buttonStyle()}>
+            Close
+          </button>
+        </div>
+        <div style={{ padding: '14px', display: 'grid', gap: '14px' }}>
+          {children}
+        </div>
+      </section>
+    </div>
   )
 }
 
@@ -129,7 +167,9 @@ function AgendaItemCard({ item, active, onSelect }) {
         <div style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700, lineHeight: 1.25 }}>{item.workflow_title}</div>
         <StatusPill tone={tone}>{item.priority_score}</StatusPill>
       </div>
-      <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT }}>{item.workflow_type}</div>
+      <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT }}>
+        {WORKFLOW_LABELS[item.workflow_type] || item.workflow_type}
+      </div>
       <div style={{ color: '#4a7a5a', fontSize: '12px', lineHeight: 1.35 }}>{item.why_today}</div>
       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
         <StatusPill tone={statusTone(item.status)}>{item.status}</StatusPill>
@@ -639,6 +679,72 @@ function ZipActivationRecommendation({ item, onPassZip, disabled }) {
   )
 }
 
+function RelationshipGrowthRecommendation({ item }) {
+  if (item?.workflow_type !== 'relationship_growth') return null
+  const entities = item.linked_entities || {}
+  const knownTargets = Array.isArray(entities.known_group_targets) ? entities.known_group_targets : []
+  const metricRows = [
+    ['Eligible targets', entities.eligible_group_target_count],
+    ['Target goal', entities.group_target_goal],
+    ['Gap', entities.group_target_gap],
+    ['Daily sessions', entities.daily_session_goal],
+  ].filter(([, value]) => value !== null && value !== undefined && value !== '')
+  return (
+    <section style={{ border: '1px solid #00e676', borderRadius: '6px', background: '#04200f', padding: '12px', display: 'grid', gap: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'start', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ color: '#00e676', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Daily relationship workflow</div>
+          <div style={{ color: '#e0ffe0', fontSize: '15px', fontWeight: 700, marginTop: '5px' }}>
+            Expand the Facebook relationship graph before stacking more ZIP launches.
+          </div>
+        </div>
+        <StatusPill tone="#ffd54f">Carlos final action</StatusPill>
+      </div>
+      <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
+        The browser pass should discover cattle groups, sale barn pages, and ranch operator surfaces, then stage candidates for review. It must stop before any join, follow, like, comment, share, or post.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px' }}>
+        {metricRows.map(([label, value]) => (
+          <div key={label} style={{ border: '1px solid #1a3a2a', borderRadius: '5px', padding: '9px', background: '#031808' }}>
+            <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</div>
+            <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 700, marginTop: '5px' }}>{String(value)}</div>
+          </div>
+        ))}
+      </div>
+      {knownTargets.length > 0 && (
+        <section style={{ display: 'grid', gap: '8px' }}>
+          <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 700 }}>Current approved targets</div>
+          {knownTargets.slice(0, 6).map(target => (
+            <article key={target.group_target_id || target.group_url || target.group_name} style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '9px', display: 'grid', gap: '5px' }}>
+              <div style={{ color: '#e0ffe0', fontSize: '12px', fontWeight: 700 }}>{target.group_name || 'Facebook group'}</div>
+              {target.group_url && <a href={target.group_url} target="_blank" rel="noreferrer" style={{ color: '#00e676', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>{target.group_url}</a>}
+              <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT }}>{target.content_fit || 'fit_unknown'} | {target.identity_appropriateness || 'identity_unknown'}</div>
+            </article>
+          ))}
+        </section>
+      )}
+    </section>
+  )
+}
+
+function ActiveRunSummary({ run, activeGate, onOpen }) {
+  if (!run) return null
+  return (
+    <section style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', padding: '12px', display: 'grid', gap: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'start', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ color: '#ffd54f', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Current gate</div>
+          <div style={{ color: '#fff4bd', fontSize: '15px', fontWeight: 700, marginTop: '4px' }}>{activeGate?.title || run.current_step_id || 'Workflow waiting'}</div>
+          <div style={{ color: '#ffe9a6', fontSize: '12px', lineHeight: 1.4, marginTop: '5px' }}>{activeGate?.message || 'Open the run to inspect the next decision.'}</div>
+        </div>
+        <button type="button" onClick={onOpen} style={buttonStyle({ filled: true, tone: '#ffd54f' })}>
+          Review gate
+        </button>
+      </div>
+    </section>
+  )
+}
+
 export default function TodayAgendaWorkspace({
   agenda,
   agendaLoading,
@@ -661,6 +767,7 @@ export default function TodayAgendaWorkspace({
   const [selectedItemId, setSelectedItemId] = useState('')
   const [activationZip, setActivationZip] = useState('')
   const [passedActivationZips, setPassedActivationZips] = useState([])
+  const [runModalOpen, setRunModalOpen] = useState(false)
   const selectedItem = useMemo(() => (
     items.find(item => item.agenda_item_id === selectedItemId)
     || items.find(item => item.agenda_item_id === agenda?.primary_item_id)
@@ -680,6 +787,7 @@ export default function TodayAgendaWorkspace({
   const normalizedActivationZip = activationZip.trim()
   const activationZipValid = /^\d{5}$/.test(normalizedActivationZip)
   const activationLoading = actionLoading === 'compose:zip'
+  const relationshipLoading = actionLoading === 'compose:relationship'
   const composeNextZip = (excludedZips = passedActivationZips, operatorNotes = 'Carlos requested the next eligible ZIP activation.') => onComposeAgenda(true, {
     include_workflow_types: ['zip_price_activation'],
     zip_activation_limit: 1,
@@ -694,6 +802,11 @@ export default function TodayAgendaWorkspace({
     setPassedActivationZips(nextPassed)
     composeNextZip(nextPassed, `Carlos passed ZIP ${normalizedZip}; show the next best eligible ZIP activation.`)
   }
+  const composeRelationshipGrowth = () => onComposeAgenda(true, {
+    include_workflow_types: ['relationship_growth'],
+    operator_notes: 'Carlos requested the daily relationship growth workflow.',
+    loadingKey: 'compose:relationship',
+  })
 
   return (
     <div style={{ display: 'grid', gap: '14px' }}>
@@ -717,6 +830,31 @@ export default function TodayAgendaWorkspace({
             </button>
           </div>
         </div>
+
+        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '10px' }}>
+          <button
+            type="button"
+            onClick={composeRelationshipGrowth}
+            disabled={!hasAdminKey || relationshipLoading}
+            style={{ ...buttonStyle({ filled: true, disabled: !hasAdminKey || relationshipLoading }), minHeight: '74px', textAlign: 'left', display: 'grid', alignContent: 'center', gap: '5px' }}
+          >
+            <span>{relationshipLoading ? 'Composing...' : 'Start relationship growth'}</span>
+            <span style={{ color: !hasAdminKey || relationshipLoading ? '#021a0e' : '#063512', fontSize: '11px', lineHeight: 1.35, textTransform: 'none', letterSpacing: 0 }}>
+              Find more cattle groups, pages, and safe interaction candidates.
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => composeNextZip()}
+            disabled={!hasAdminKey || activationLoading}
+            style={{ ...buttonStyle({ disabled: !hasAdminKey || activationLoading }), minHeight: '74px', textAlign: 'left', display: 'grid', alignContent: 'center', gap: '5px' }}
+          >
+            <span>{activationLoading ? 'Finding...' : 'Find next ZIP launch'}</span>
+            <span style={{ color: '#8abf8a', fontSize: '11px', lineHeight: 1.35, textTransform: 'none', letterSpacing: 0 }}>
+              Pick the next market with strong public price evidence.
+            </span>
+          </button>
+        </section>
 
         <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#021a0e', padding: '12px', display: 'grid', gap: '10px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: '10px', alignItems: 'end' }}>
@@ -783,7 +921,7 @@ export default function TodayAgendaWorkspace({
           </div>
           <div style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '12px' }}>
             <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Primary</div>
-            <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 700, marginTop: '10px' }}>{selectedItem?.workflow_type || 'none'}</div>
+            <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 700, marginTop: '10px' }}>{selectedItem ? (WORKFLOW_LABELS[selectedItem.workflow_type] || selectedItem.workflow_type) : 'none'}</div>
           </div>
         </div>
       </section>
@@ -827,16 +965,17 @@ export default function TodayAgendaWorkspace({
                 </div>
 
                 <ZipActivationRecommendation item={selectedItem} onPassZip={handlePassZip} disabled={!hasAdminKey || activationLoading} />
+                <RelationshipGrowthRecommendation item={selectedItem} />
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '10px' }}>
                   <ReadinessList title="Readiness checks" checks={selectedItem.readiness_checks} />
                   <ReadinessList title="Facebook safety checks" checks={selectedItem.facebook_safety_checks} />
                 </div>
 
-                <section style={{ display: 'grid', gap: '10px' }}>
-                  <div style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700 }}>Execution chain</div>
+                <details open={!activeRun} style={{ display: 'grid', gap: '10px' }}>
+                  <summary style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>Execution chain</summary>
                   <WorkflowStepList steps={activeRun?.steps || selectedItem.expected_steps} currentStepId={activeRun?.current_step_id} />
-                </section>
+                </details>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '10px' }}>
                   <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '12px', display: 'grid', gap: '6px' }}>
@@ -852,28 +991,37 @@ export default function TodayAgendaWorkspace({
                     ))}
                   </section>
                 </div>
-              </section>
-            )}
 
-            {activeRun && (
-              <RunControls
-                run={activeRun}
-                activeGate={activeGate}
-                launchPackageCampaigns={launchPackageCampaigns}
-                zipLoading={zipLoading}
-                onGenerateCreative={onGenerateCreative}
-                onOpenDraftReview={onOpenDraftReview}
-                onRunNextStep={onRunNextStep}
-                onRecordDecision={onRecordDecision}
-                onRequestShareStaging={onRequestShareStaging}
-                actionLoading={actionLoading}
-                shareOutcomeActionLoading={shareOutcomeActionLoading}
-              />
+                {activeRun && (
+                  <ActiveRunSummary run={activeRun} activeGate={activeGate} onOpen={() => setRunModalOpen(true)} />
+                )}
+              </section>
             )}
           </main>
         </div>
       ) : (
         <EmptyState message={agendaLoading ? 'Loading agenda...' : 'No agenda items yet. Compose today to pull research and readiness signals.'} />
+      )}
+      {activeRun && runModalOpen && (
+        <Modal title={`Review workflow gate: ${activeRun.workflow_title}`} onClose={() => setRunModalOpen(false)}>
+          <RunControls
+            run={activeRun}
+            activeGate={activeGate}
+            launchPackageCampaigns={launchPackageCampaigns}
+            zipLoading={zipLoading}
+            onGenerateCreative={onGenerateCreative}
+            onOpenDraftReview={onOpenDraftReview}
+            onRunNextStep={onRunNextStep}
+            onRecordDecision={onRecordDecision}
+            onRequestShareStaging={onRequestShareStaging}
+            actionLoading={actionLoading}
+            shareOutcomeActionLoading={shareOutcomeActionLoading}
+          />
+          <section style={{ display: 'grid', gap: '10px' }}>
+            <div style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700 }}>Execution context</div>
+            <WorkflowStepList steps={activeRun.steps} currentStepId={activeRun.current_step_id} />
+          </section>
+        </Modal>
       )}
     </div>
   )

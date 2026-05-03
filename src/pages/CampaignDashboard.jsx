@@ -18,8 +18,16 @@ const CHANNELS = [{ id: 'all', label: 'All Channels' }, { id: 'facebook_page', l
 const URL_PATTERN = /https?:\/\/world\.anymalos\.com\/[^\s)]*/
 const DEFAULT_CANARY_ZIP = '74501'
 const CREATIVE_TEMPLATE_ID = 'city_price_launch_v1'
+const WORKSPACE_IDS = new Set(['agenda', 'drafts', 'canary', 'distribution', 'nativeVideo', 'outcomes', 'published'])
 
 const EMPTY_TARGET_GROUP = { group_name: '', group_url: '', public_private: 'unknown', member_count: '', member_count_band: 'unknown', group_focus: '', post_text: '', utm_content: '', utm_url: '', remove_link_preview: true }
+
+function workspaceFromLocation() {
+  if (typeof window === 'undefined') return 'agenda'
+  const fromHash = window.location.hash.replace('#', '').trim()
+  return WORKSPACE_IDS.has(fromHash) ? fromHash : 'agenda'
+}
+
 function findAnymalUrl(message) {
   if (!message) return null
   const match = message.match(URL_PATTERN)
@@ -171,7 +179,7 @@ export default function CampaignDashboard() {
   const [marketingAgenda, setMarketingAgenda] = useState(null)
   const [agendaRuns, setAgendaRuns] = useState({})
   const [activeChannel, setActiveChannel] = useState('all')
-  const [workspace, setWorkspace] = useState('agenda')
+  const [workspace, setWorkspace] = useState(workspaceFromLocation)
   const [canaryZip, setCanaryZip] = useState(DEFAULT_CANARY_ZIP)
   const [selectedAnchorId, setSelectedAnchorId] = useState('')
   const [targetGroups, setTargetGroups] = useState([{ ...EMPTY_TARGET_GROUP }])
@@ -199,6 +207,14 @@ export default function CampaignDashboard() {
   const [zipLoading, setZipLoading] = useState({})
   const [zipErrors, setZipErrors] = useState({})
   const intervalRef = useRef(null)
+
+  const selectWorkspace = useCallback((nextWorkspace) => {
+    const next = WORKSPACE_IDS.has(nextWorkspace) ? nextWorkspace : 'agenda'
+    setWorkspace(next)
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${next}`)
+    }
+  }, [])
   const agendaRunHydrationRef = useRef(new Set())
 
   const allCampaigns = useMemo(() => [...pending, ...published], [pending, published])
@@ -300,6 +316,14 @@ export default function CampaignDashboard() {
       tone: '#00e676',
     },
   ]), [canaryJobs.length, distributionPlans.length, nativeVideoJobs.length, opsStats, pending.length, published.length, shareOutcomes.length])
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      setWorkspace(workspaceFromLocation())
+    }
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
 
   useEffect(() => {
     if (!selectedAnchorId && pageAnchors[0]) {
@@ -662,7 +686,7 @@ export default function CampaignDashboard() {
 
   const handleOpenDraftReviewForZip = (zip) => {
     const normalizedZip = String(zip || '').padStart(5, '0')
-    setWorkspace('drafts')
+    selectWorkspace('drafts')
     setActiveChannel('all')
     setActionSuccess(`Draft Review opened. Select ZIP ${normalizedZip} to inspect the Page draft.`)
     setTimeout(() => setActionSuccess(null), 5000)
@@ -913,7 +937,7 @@ export default function CampaignDashboard() {
       if (!res.ok) throw new Error(await readErrorDetail(res))
       const plan = await res.json()
       replaceDistributionPlan(plan)
-      setWorkspace('distribution')
+      selectWorkspace('distribution')
       setActionSuccess(`Distribution plan composed: ${plan.plan_id}`)
       setTimeout(() => setActionSuccess(null), 5000)
     } catch (err) {
@@ -1094,7 +1118,7 @@ export default function CampaignDashboard() {
       if (!res.ok) throw new Error(await readErrorDetail(res))
       const job = await res.json()
       replaceNativeVideoJob(job)
-      setWorkspace('nativeVideo')
+      selectWorkspace('nativeVideo')
       setActionSuccess(`Native video job created: ${job.video_job_id}`)
       setTimeout(() => setActionSuccess(null), 5000)
     } catch (err) {
@@ -1186,7 +1210,7 @@ export default function CampaignDashboard() {
       if (!res.ok) throw new Error(await readErrorDetail(res))
       const agenda = await res.json()
       setMarketingAgenda(agenda)
-      setWorkspace('agenda')
+      selectWorkspace('agenda')
       const zip = options.candidate_zips?.[0]
       setActionSuccess(zip ? `ZIP activation workflow composed for ${zip}.` : options.excluded_zips?.length ? 'Next eligible ZIP activation workflow composed.' : forceRefresh ? 'Fresh marketing agenda composed.' : 'Marketing agenda loaded.')
       setTimeout(() => setActionSuccess(null), 4000)
@@ -1343,7 +1367,7 @@ export default function CampaignDashboard() {
       } catch { /* no-op */ }
     }
     setCanaryZip(zip)
-    setWorkspace('canary')
+    selectWorkspace('canary')
     setCanarySourceCampaign(campaign)
     setTargetGroups(groups => {
       const next = groups.length ? [...groups] : [{ ...EMPTY_TARGET_GROUP }]
@@ -1367,10 +1391,10 @@ export default function CampaignDashboard() {
       {actionSuccess && <div style={{ background: '#0a2a1a', border: '1px solid #00e676', borderRadius: '6px', padding: '10px 14px', marginBottom: '14px', fontSize: '12px', color: '#00e676' }}>{actionSuccess}</div>}
       {actionError && <div style={{ background: '#2a0a0a', border: '1px solid #ff4444', borderRadius: '6px', padding: '10px 14px', marginBottom: '14px', fontSize: '12px', color: '#ff4444' }}>{actionError}</div>}
 
-      <OpsMetricsRow stats={opsStats} />
+      <OpsMetricsRow stats={opsStats} activeWorkspace={workspace} onSelectWorkspace={selectWorkspace} />
       <NextBestActionPanel stats={opsStats} />
 
-      <WorkspaceTabs tabs={workspaceTabs} activeWorkspace={workspace} onSelectWorkspace={setWorkspace} />
+      <WorkspaceTabs tabs={workspaceTabs} activeWorkspace={workspace} onSelectWorkspace={selectWorkspace} />
 
       {workspace === 'agenda' && (
         <TodayAgendaWorkspace
