@@ -1092,6 +1092,31 @@ export default function CampaignDashboard() {
     setTimeout(() => setActionSuccess(null), 5000)
   }
 
+  const handleRequestRelationshipGrowthStaging = async (runId) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Relationship growth staging requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setAgendaActionLoading(`relationship-stage:${runId}`)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/marketing-agenda/runs/${runId}/relationship-growth/staging-request`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({ operator_notes: 'Carlos requested autonomous relationship-growth browser staging from the dashboard.' }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const run = await res.json()
+      setAgendaRuns(map => ({ ...map, [run.run_id]: run }))
+      setActionSuccess('Relationship-growth browser staging requested. The local desktop runner will inspect Facebook and stop before any live action.')
+      setTimeout(() => setActionSuccess(null), 6000)
+    } catch (err) {
+      setActionError(`Relationship-growth staging request failed: ${err.message}`)
+    } finally {
+      setAgendaActionLoading(null)
+    }
+  }
+
   const replaceNativeVideoJob = (updatedJob) => {
     setNativeVideoJobs(jobs => {
       const exists = jobs.some(job => job.video_job_id === updatedJob.video_job_id)
@@ -1411,6 +1436,7 @@ export default function CampaignDashboard() {
           onRunNextStep={handleRunNextAgendaStep}
           onRecordDecision={handleRecordAgendaDecision}
           onRequestShareStaging={handleRequestShareStaging}
+          onRequestRelationshipGrowthStaging={handleRequestRelationshipGrowthStaging}
           zipLoading={zipLoading}
           actionLoading={agendaActionLoading}
           shareOutcomeActionLoading={outcomeActionLoading}

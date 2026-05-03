@@ -11,6 +11,11 @@ const SHARE_STAGING_ACTIVE_STATUSES = new Set([
   'staging_requested',
   'staging_in_progress',
 ])
+const RELATIONSHIP_STAGE_READY_STATUS = 'staged_for_operator_review'
+const RELATIONSHIP_STAGING_ACTIVE_STATUSES = new Set([
+  'staging_requested',
+  'staging_in_progress',
+])
 const WORKFLOW_LABELS = {
   relationship_growth: 'Relationship growth',
   zip_price_activation: 'ZIP launch',
@@ -257,6 +262,22 @@ function gateEvidenceState(run, activeGate, campaigns) {
         : 'The Facebook composer has not been staged yet. Request browser staging, then wait for the local desktop runner to mark the share staged_for_operator_review before approving Post.',
     }
   }
+  if (gateId === 'stage_growth_browser_session') {
+    return {
+      blocked: true,
+      message: 'Relationship growth staging must be produced by the desktop browser runner. Request staging and wait for candidates before approving.',
+    }
+  }
+  if (gateId === 'approve_join_follow_comment_actions') {
+    const stageResult = stepResult(run, 'stage_growth_browser_session')
+    const candidateCount = Number(stageResult?.candidate_count || (Array.isArray(stageResult?.candidates) ? stageResult.candidates.length : 0))
+    return {
+      blocked: stageResult?.staging_status !== RELATIONSHIP_STAGE_READY_STATUS || candidateCount < 1,
+      message: stageResult?.staging_status === RELATIONSHIP_STAGE_READY_STATUS && candidateCount > 0
+        ? ''
+        : 'Relationship candidates must be staged by the desktop browser runner before Carlos can approve any action recommendations.',
+    }
+  }
   return { blocked: false, message: '' }
 }
 
@@ -270,6 +291,7 @@ function RunControls({
   onRunNextStep,
   onRecordDecision,
   onRequestShareStaging,
+  onRequestRelationshipGrowthStaging,
   actionLoading,
   shareOutcomeActionLoading,
 }) {
@@ -322,6 +344,14 @@ function RunControls({
           run={run}
           onRequestShareStaging={onRequestShareStaging}
           shareOutcomeActionLoading={shareOutcomeActionLoading}
+        />
+      )}
+
+      {(activeGate?.step_id === 'stage_growth_browser_session' || activeGate?.step_id === 'approve_join_follow_comment_actions') && (
+        <RelationshipGrowthStageReview
+          run={run}
+          onRequestRelationshipGrowthStaging={onRequestRelationshipGrowthStaging}
+          actionLoading={actionLoading}
         />
       )}
 
@@ -611,6 +641,97 @@ function PersonalShareStageReview({ run, onRequestShareStaging, shareOutcomeActi
   )
 }
 
+function RelationshipGrowthStageReview({ run, onRequestRelationshipGrowthStaging, actionLoading }) {
+  const stage = stepResult(run, 'stage_growth_browser_session') || {}
+  const status = stage.staging_status || 'not_requested'
+  const candidates = Array.isArray(stage.candidates) ? stage.candidates : []
+  const active = RELATIONSHIP_STAGING_ACTIVE_STATUSES.has(status)
+  const ready = status === RELATIONSHIP_STAGE_READY_STATUS
+  const canRequest = Boolean(run?.run_id && onRequestRelationshipGrowthStaging && !active)
+  return (
+    <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'start', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Relationship browser staging</div>
+          <div style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700, marginTop: '4px' }}>
+            {ready
+              ? `${candidates.length} candidate${candidates.length === 1 ? '' : 's'} staged for Carlos review`
+              : active
+                ? 'Desktop runner requested'
+                : 'No browser candidate pass staged yet'}
+          </div>
+        </div>
+        <StatusPill tone={ready ? '#00e676' : active ? '#4da3ff' : status === 'staging_failed' ? '#ff4444' : '#ffd54f'}>
+          {status}
+        </StatusPill>
+      </div>
+      <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
+        The desktop runner uses the same Codex Computer Use path as ZIP share staging, but this workflow only discovers and drafts recommendations. It must not join, follow, like, comment, share, or post.
+      </div>
+      {!ready && (
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() => onRequestRelationshipGrowthStaging?.(run.run_id)}
+            disabled={!canRequest || actionLoading === `relationship-stage:${run?.run_id}`}
+            style={buttonStyle({ filled: true, disabled: !canRequest || actionLoading === `relationship-stage:${run?.run_id}` })}
+          >
+            {active ? 'Staging requested' : 'Request relationship browser pass'}
+          </button>
+          <span style={{ color: '#8abf8a', fontSize: '11px', lineHeight: 1.35 }}>
+            The local desktop runner will inspect Facebook and return candidates for review.
+          </span>
+        </div>
+      )}
+      {stage.desktop_bridge_command && (
+        <div style={{ display: 'grid', gap: '5px' }}>
+          <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Desktop bridge command</div>
+          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#c8f7c8', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
+            {stage.desktop_bridge_command}
+          </pre>
+        </div>
+      )}
+      {stage.agent_notes && (
+        <div style={{ color: status === 'staging_failed' ? '#ffb3b3' : '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
+          {stage.agent_notes}
+        </div>
+      )}
+      {candidates.length > 0 && (
+        <div style={{ display: 'grid', gap: '8px' }}>
+          {candidates.map((candidate, index) => (
+            <article key={`${candidate.url || candidate.name || index}`} style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '10px', display: 'grid', gap: '7px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', alignItems: 'start' }}>
+                <div>
+                  <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 700 }}>{candidate.name || 'Candidate surface'}</div>
+                  <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT, marginTop: '3px' }}>{candidate.surface_type || 'surface'} | {candidate.recommended_action || 'review'}</div>
+                </div>
+                {candidate.risk_level && <StatusPill tone={candidate.risk_level === 'low' ? '#00e676' : '#ffd54f'}>{candidate.risk_level}</StatusPill>}
+              </div>
+              {candidate.url && <a href={candidate.url} target="_blank" rel="noopener noreferrer" style={{ color: '#00e676', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>{candidate.url}</a>}
+              {candidate.why_relevant && <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>{candidate.why_relevant}</div>}
+              {candidate.suggested_text && (
+                <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#c8f7c8', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
+                  {candidate.suggested_text}
+                </pre>
+              )}
+              {Array.isArray(candidate.risk_flags) && candidate.risk_flags.length > 0 && (
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {candidate.risk_flags.map(flag => <StatusPill key={flag} tone="#ffd54f">{flag}</StatusPill>)}
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+      {ready && (
+        <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', color: '#ffe58a', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
+          Approving the next gate only accepts these recommendations for lower-layer review. Carlos still performs any final join, follow, like, comment, share, or post action manually.
+        </div>
+      )}
+    </section>
+  )
+}
+
 function ZipActivationRecommendation({ item, onPassZip, disabled }) {
   if (item?.workflow_type !== 'zip_price_activation') return null
   const entities = item.linked_entities || {}
@@ -759,6 +880,7 @@ export default function TodayAgendaWorkspace({
   onRunNextStep,
   onRecordDecision,
   onRequestShareStaging,
+  onRequestRelationshipGrowthStaging,
   zipLoading,
   actionLoading,
   shareOutcomeActionLoading,
@@ -1014,6 +1136,7 @@ export default function TodayAgendaWorkspace({
             onRunNextStep={onRunNextStep}
             onRecordDecision={onRecordDecision}
             onRequestShareStaging={onRequestShareStaging}
+            onRequestRelationshipGrowthStaging={onRequestRelationshipGrowthStaging}
             actionLoading={actionLoading}
             shareOutcomeActionLoading={shareOutcomeActionLoading}
           />
