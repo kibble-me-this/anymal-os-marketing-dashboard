@@ -6,6 +6,9 @@ const SANS_FONT = "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
 const STATUS_LABELS = {
   queued: 'Queued',
   approved_for_attended_share: 'Approved',
+  staging_requested: 'Staging requested',
+  staging_in_progress: 'Staging',
+  staged_for_operator_review: 'Staged',
   running: 'Running',
   submitted_visible_or_feed: 'Visible',
   pending_admin_approval: 'Pending approval',
@@ -14,6 +17,7 @@ const STATUS_LABELS = {
   blocked_identity_mismatch: 'Identity mismatch',
   blocked_posting_restricted: 'Posting restricted',
   blocked_group_rules: 'Group rules',
+  staging_failed: 'Staging failed',
   failed_ui: 'UI failed',
   cancelled_by_operator: 'Cancelled',
   needs_manual_classification: 'Needs classification',
@@ -21,7 +25,9 @@ const STATUS_LABELS = {
 
 function statusTone(status) {
   if (['submitted_visible_or_feed', 'pending_admin_approval'].includes(status)) return '#00e676'
-  if (String(status || '').startsWith('blocked_') || status === 'failed_ui') return '#ff4444'
+  if (String(status || '').startsWith('blocked_') || status === 'failed_ui' || status === 'staging_failed') return '#ff4444'
+  if (status === 'staged_for_operator_review') return '#00e676'
+  if (status === 'staging_requested' || status === 'staging_in_progress') return '#4da3ff'
   if (status === 'approved_for_attended_share' || status === 'running') return '#4da3ff'
   if (status === 'cancelled_by_operator' || status === 'needs_manual_classification') return '#ffd54f'
   return '#8abf8a'
@@ -121,6 +127,12 @@ export default function ShareOutcomeCard({ outcome, onUpdateOutcome, actionLoadi
       </div>
 
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <button type="button" disabled={loading || outcome.status === 'staging_requested' || outcome.status === 'staging_in_progress'} onClick={() => updateStatus('staging_requested', 'dashboard_requested_browser_staging')} style={buttonStyle({ filled: true, disabled: loading || outcome.status === 'staging_requested' || outcome.status === 'staging_in_progress' })}>
+          Request staging
+        </button>
+        <button type="button" disabled={loading} onClick={() => updateStatus('staged_for_operator_review', 'browser_composer_staged')} style={buttonStyle({ disabled: loading })}>
+          Mark staged
+        </button>
         <button type="button" disabled={loading} onClick={() => updateStatus('submitted_visible_or_feed', 'operator_verified_visible')} style={buttonStyle({ filled: true, disabled: loading })}>
           Mark visible
         </button>

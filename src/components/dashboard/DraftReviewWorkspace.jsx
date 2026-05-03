@@ -531,6 +531,13 @@ function ZipCampaignCard({
   const isLoading = ['generating', 'regenerating', 'refreshing_drafts'].includes(loadingPhase)
   const canRefreshDrafts = !isOther && (group.needsRefresh || (group.creativeStatus === 'creative_current' && group.hasFacebookDraftWithoutCreative))
   const place = [group.city, group.county, group.state].filter(Boolean).join(', ')
+  const needsCreativeReview = group.zipStatus === 'needs_creative_review'
+  const creativeReady = group.creativeStatus === 'creative_current'
+  const helperMessage = needsCreativeReview && group.campaigns.length > 1
+    ? creativeReady
+      ? `${group.campaigns.length} drafts at this ZIP are ready for copy and Page-anchor review.`
+      : `${group.campaigns.length} drafts at this ZIP await creative generation or refresh.`
+    : ''
 
   return (
     <div style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '16px', marginBottom: '14px', background: '#021a0e' }}>
@@ -561,7 +568,11 @@ function ZipCampaignCard({
             disabled={!HAS_MARKETING_ADMIN_KEY}
             errorDetail={zipError}
           />
-          {group.zipStatus === 'needs_creative_review' && group.campaigns.length > 1 && <div style={{ color: '#ffd54f', fontSize: '11px', marginTop: '8px' }}>{group.campaigns.length} drafts at this ZIP await creative generation or refresh.</div>}
+          {helperMessage && (
+            <div style={{ color: creativeReady ? '#8abf8a' : '#ffd54f', fontSize: '11px', marginTop: '8px' }}>
+              {helperMessage}
+            </div>
+          )}
         </div>
       )}
 

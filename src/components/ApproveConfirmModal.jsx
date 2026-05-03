@@ -64,6 +64,24 @@ function formatImageSize(base64) {
   return `${(approxBytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
+function resolveAttachedImage(campaign) {
+  const imageBase64 = campaign.chart_base64 || ''
+  const creativeUrl = campaign.creative_metadata?.image_url || campaign.published_image_url || ''
+  if (imageBase64) {
+    return {
+      src: `data:image/png;base64,${imageBase64}`,
+      label: `Yes (${formatImageSize(imageBase64)})`,
+    }
+  }
+  if (creativeUrl) {
+    return {
+      src: creativeUrl,
+      label: 'Yes (creative asset)',
+    }
+  }
+  return { src: '', label: 'No' }
+}
+
 function UnfurlCard({ url }) {
   const parsed = parseUrl(url)
   if (!parsed) return null
@@ -146,15 +164,15 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
   const destName = CHANNEL_DESTINATION_NAME[channel] || 'the destination platform'
 
   const message = campaign.message || campaign.generated_copy || ''
-  const imageBase64 = campaign.chart_base64 || ''
+  const attachedImage = resolveAttachedImage(campaign)
+  const hasAttachedImage = Boolean(attachedImage.src)
   const url = extractUrl(message)
   const parsedUrl = parseUrl(url)
   const utmCampaign = parsedUrl?.searchParams.get('utm_campaign') || ''
-  const destination = parsedUrl ? `${parsedUrl.origin}${parsedUrl.pathname}` : ''
 
   const warnings = useMemo(() => {
     const list = []
-    if (channel === 'facebook_page' && !imageBase64) {
+    if (channel === 'facebook_page' && !hasAttachedImage) {
       list.push({
         level: 'warn',
         text: 'No image attached. Facebook posts without images typically get 50% less reach. Are you sure?',
@@ -173,7 +191,7 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
       })
     }
     return list
-  }, [channel, imageBase64, utmCampaign, message])
+  }, [channel, hasAttachedImage, utmCampaign, message])
 
   const handleConfirm = async () => {
     setError(null)
@@ -286,9 +304,9 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
               background: '#04200e',
             }}
           >
-            {imageBase64 && (
+            {attachedImage.src && (
               <img
-                src={`data:image/png;base64,${imageBase64}`}
+                src={attachedImage.src}
                 alt="post preview"
                 style={{
                   display: 'block',
@@ -347,7 +365,7 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
 
             <dt style={{ color: 'rgba(255,255,255,0.55)' }}>Image attached</dt>
             <dd style={{ margin: 0, color: '#c0e0c0' }}>
-              {imageBase64 ? `Yes (${formatImageSize(imageBase64)})` : 'No'}
+              {attachedImage.label}
             </dd>
 
             <dt style={{ color: 'rgba(255,255,255,0.55)' }}>Character count</dt>

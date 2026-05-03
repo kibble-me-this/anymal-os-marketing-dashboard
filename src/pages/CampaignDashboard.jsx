@@ -18,8 +18,16 @@ const CHANNELS = [{ id: 'all', label: 'All Channels' }, { id: 'facebook_page', l
 const URL_PATTERN = /https?:\/\/world\.anymalos\.com\/[^\s)]*/
 const DEFAULT_CANARY_ZIP = '74501'
 const CREATIVE_TEMPLATE_ID = 'city_price_launch_v1'
+const WORKSPACE_IDS = new Set(['agenda', 'drafts', 'canary', 'distribution', 'nativeVideo', 'outcomes', 'published'])
 
 const EMPTY_TARGET_GROUP = { group_name: '', group_url: '', public_private: 'unknown', member_count: '', member_count_band: 'unknown', group_focus: '', post_text: '', utm_content: '', utm_url: '', remove_link_preview: true }
+
+function workspaceFromLocation() {
+  if (typeof window === 'undefined') return 'agenda'
+  const fromHash = window.location.hash.replace('#', '').trim()
+  return WORKSPACE_IDS.has(fromHash) ? fromHash : 'agenda'
+}
+
 function findAnymalUrl(message) {
   if (!message) return null
   const match = message.match(URL_PATTERN)
@@ -81,7 +89,7 @@ async function readApiError(res) {
     const body = await res.json()
     const detail = body?.detail || body
     if (typeof detail === 'string') return { message: detail, detail: { error: detail } }
-    return { message: detail?.error || detail?.message || `${res.status}`, detail }
+    return { message: detail?.message || detail?.error || `${res.status}`, detail }
   } catch {
     return { message: `${res.status}`, detail: { error: `${res.status}` } }
   }
@@ -171,7 +179,7 @@ export default function CampaignDashboard() {
   const [marketingAgenda, setMarketingAgenda] = useState(null)
   const [agendaRuns, setAgendaRuns] = useState({})
   const [activeChannel, setActiveChannel] = useState('all')
-  const [workspace, setWorkspace] = useState('agenda')
+  const [workspace, setWorkspace] = useState(workspaceFromLocation)
   const [canaryZip, setCanaryZip] = useState(DEFAULT_CANARY_ZIP)
   const [selectedAnchorId, setSelectedAnchorId] = useState('')
   const [targetGroups, setTargetGroups] = useState([{ ...EMPTY_TARGET_GROUP }])
@@ -199,6 +207,15 @@ export default function CampaignDashboard() {
   const [zipLoading, setZipLoading] = useState({})
   const [zipErrors, setZipErrors] = useState({})
   const intervalRef = useRef(null)
+
+  const selectWorkspace = useCallback((nextWorkspace) => {
+    const next = WORKSPACE_IDS.has(nextWorkspace) ? nextWorkspace : 'agenda'
+    setWorkspace(next)
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${next}`)
+    }
+  }, [])
+  const agendaRunHydrationRef = useRef(new Set())
 
   const allCampaigns = useMemo(() => [...pending, ...published], [pending, published])
   const zipOptions = useMemo(() => {
@@ -299,6 +316,14 @@ export default function CampaignDashboard() {
       tone: '#00e676',
     },
   ]), [canaryJobs.length, distributionPlans.length, nativeVideoJobs.length, opsStats, pending.length, published.length, shareOutcomes.length])
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      setWorkspace(workspaceFromLocation())
+    }
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
 
   useEffect(() => {
     if (!selectedAnchorId && pageAnchors[0]) {
@@ -421,6 +446,45 @@ export default function CampaignDashboard() {
     return () => clearInterval(intervalRef.current)
   }, [fetchData])
 
+  useEffect(() => {
+    if (!HAS_MARKETING_ADMIN_KEY) return
+    const hydratingRunIds = agendaRunHydrationRef.current
+    const activeRunIds = (marketingAgenda?.items || [])
+      .map(item => item.active_run_id)
+      .filter(Boolean)
+    const missingRunIds = activeRunIds.filter(runId => (
+      !agendaRuns[runId] && !hydratingRunIds.has(runId)
+    ))
+    if (!missingRunIds.length) return
+
+    let cancelled = false
+    missingRunIds.forEach(runId => hydratingRunIds.add(runId))
+    Promise.all(missingRunIds.map(async (runId) => {
+      const res = await fetch(`${MARKETING_API}/marketing-agenda/runs/${runId}`, { headers: adminHeaders })
+      if (!res.ok) throw new Error(`${runId}: ${await readErrorDetail(res)}`)
+      return res.json()
+    }))
+      .then(runs => {
+        if (cancelled) return
+        setAgendaRuns(map => {
+          const next = { ...map }
+          runs.forEach(run => {
+            next[run.run_id] = run
+          })
+          return next
+        })
+      })
+      .catch(err => {
+        missingRunIds.forEach(runId => hydratingRunIds.delete(runId))
+        console.error('Failed to hydrate agenda runs:', err)
+      })
+
+    return () => {
+      cancelled = true
+      missingRunIds.forEach(runId => hydratingRunIds.delete(runId))
+    }
+  }, [agendaRuns, marketingAgenda])
+
   const handleRequestApprove = (campaign) => {
     setActionError(null)
     setPendingConfirm(campaign)
@@ -435,12 +499,7 @@ export default function CampaignDashboard() {
     try {
       const res = await fetch(`${MARKETING_API}/campaigns/${campaignId}/approve`, { method: 'POST', headers })
       if (!res.ok) {
-        let detail = `${res.status}`
-        try {
-          const body = await res.json()
-          if (body?.detail) detail = body.detail
-        } catch { /* no-op */ }
-        throw new Error(detail)
+        throw new Error(await readErrorDetail(res))
       }
       setActionSuccess(`Published: ${campaignId}`)
       setTimeout(() => setActionSuccess(null), 4000)
@@ -586,6 +645,51 @@ export default function CampaignDashboard() {
     } finally {
       clearZipLoadingPhase(zip)
     }
+  }
+
+  const handleGenerateAndAttachCreative = async (zip) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Creative generation requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    const normalizedZip = String(zip || '').padStart(5, '0')
+    setZipLoadingPhase(normalizedZip, 'generating')
+    setActionError(null)
+    setZipErrors(errors => {
+      const next = { ...errors }
+      delete next[normalizedZip]
+      return next
+    })
+    try {
+      const asset = await callAdminPost(`/campaigns/creative/generate?zip=${normalizedZip}&template_id=${CREATIVE_TEMPLATE_ID}`)
+      const creativeMetadata = creativeMetadataFromAsset(asset)
+      setZipLoadingPhase(normalizedZip, 'attaching')
+      const body = await callAdminPost(`/campaigns/zip-local/generate?zip=${normalizedZip}`)
+      setZipCreativeOverrides(map => ({
+        ...map,
+        [normalizedZip]: {
+          creativeMetadata: body.creative_metadata || creativeMetadata,
+          creativeStatus: body.creative_status || creativeMetadata?.creative_status || 'creative_current',
+          needsRefresh: false,
+        },
+      }))
+      await fetchData()
+      setActionSuccess(`Creative generated and attached for ZIP ${normalizedZip}. Open Draft Review to inspect the Page draft.`)
+      setTimeout(() => setActionSuccess(null), 5000)
+    } catch (err) {
+      setZipErrors(errors => ({ ...errors, [normalizedZip]: err.detail || { error: err.message } }))
+      setActionError(`Creative preparation failed for ZIP ${normalizedZip}: ${err.message}`)
+    } finally {
+      clearZipLoadingPhase(normalizedZip)
+    }
+  }
+
+  const handleOpenDraftReviewForZip = (zip) => {
+    const normalizedZip = String(zip || '').padStart(5, '0')
+    selectWorkspace('drafts')
+    setActiveChannel('all')
+    setActionSuccess(`Draft Review opened. Select ZIP ${normalizedZip} to inspect the Page draft.`)
+    setTimeout(() => setActionSuccess(null), 5000)
   }
 
   const handleTargetGroupChange = (index, field, value) => {
@@ -833,7 +937,7 @@ export default function CampaignDashboard() {
       if (!res.ok) throw new Error(await readErrorDetail(res))
       const plan = await res.json()
       replaceDistributionPlan(plan)
-      setWorkspace('distribution')
+      selectWorkspace('distribution')
       setActionSuccess(`Distribution plan composed: ${plan.plan_id}`)
       setTimeout(() => setActionSuccess(null), 5000)
     } catch (err) {
@@ -933,6 +1037,23 @@ export default function CampaignDashboard() {
     )))
   }
 
+  const refreshLoadedAgendaRuns = async () => {
+    const runIds = Object.keys(agendaRuns || {})
+    if (!runIds.length) return
+    const runs = await Promise.all(runIds.map(async (runId) => {
+      const res = await fetch(`${MARKETING_API}/marketing-agenda/runs/${runId}`, { headers: adminHeaders })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      return res.json()
+    }))
+    setAgendaRuns(map => {
+      const next = { ...map }
+      runs.forEach(run => {
+        next[run.run_id] = run
+      })
+      return next
+    })
+  }
+
   const handleUpdateShareOutcome = async (shareOutcomeId, payload) => {
     if (!HAS_MARKETING_ADMIN_KEY) {
       setActionError('Outcome updates require VITE_MARKETING_ADMIN_KEY.')
@@ -952,11 +1073,47 @@ export default function CampaignDashboard() {
       setActionSuccess(`Share outcome updated: ${outcome.group_name || shareOutcomeId}`)
       setTimeout(() => setActionSuccess(null), 4000)
       await fetchData()
+      await refreshLoadedAgendaRuns()
     } catch (err) {
       setActionError(`Outcome update failed: ${err.message}`)
       throw err
     } finally {
       setOutcomeActionLoading(null)
+    }
+  }
+
+  const handleRequestShareStaging = async (shareOutcomeId) => {
+    await handleUpdateShareOutcome(shareOutcomeId, {
+      status: 'staging_requested',
+      status_reason: 'dashboard_requested_browser_staging',
+      operator_notes: 'Carlos requested browser staging from the marketing agenda.',
+    })
+    setActionSuccess('Browser staging requested. The local desktop runner will stage the Facebook composer and stop before Post.')
+    setTimeout(() => setActionSuccess(null), 5000)
+  }
+
+  const handleRequestRelationshipGrowthStaging = async (runId) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Relationship growth staging requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setAgendaActionLoading(`relationship-stage:${runId}`)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/marketing-agenda/runs/${runId}/relationship-growth/staging-request`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({ operator_notes: 'Carlos requested autonomous relationship-growth browser staging from the dashboard.' }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const run = await res.json()
+      setAgendaRuns(map => ({ ...map, [run.run_id]: run }))
+      setActionSuccess('Relationship-growth browser staging requested. The local desktop runner will inspect Facebook and stop before any live action.')
+      setTimeout(() => setActionSuccess(null), 6000)
+    } catch (err) {
+      setActionError(`Relationship-growth staging request failed: ${err.message}`)
+    } finally {
+      setAgendaActionLoading(null)
     }
   }
 
@@ -986,7 +1143,7 @@ export default function CampaignDashboard() {
       if (!res.ok) throw new Error(await readErrorDetail(res))
       const job = await res.json()
       replaceNativeVideoJob(job)
-      setWorkspace('nativeVideo')
+      selectWorkspace('nativeVideo')
       setActionSuccess(`Native video job created: ${job.video_job_id}`)
       setTimeout(() => setActionSuccess(null), 5000)
     } catch (err) {
@@ -1052,25 +1209,35 @@ export default function CampaignDashboard() {
     setAgendaRuns(map => ({ ...map, [run.run_id]: run }))
   }
 
-  const handleComposeMarketingAgenda = async (forceRefresh = false) => {
+  const handleComposeMarketingAgenda = async (forceRefresh = false, options = {}) => {
     if (!HAS_MARKETING_ADMIN_KEY) {
       setActionError('Marketing agenda requires VITE_MARKETING_ADMIN_KEY.')
       return
     }
-    setAgendaActionLoading('compose')
+    const loadingKey = options.loadingKey || 'compose'
+    const requestBody = {
+      force_refresh: forceRefresh,
+      ...(options.include_workflow_types ? { include_workflow_types: options.include_workflow_types } : {}),
+      ...(options.candidate_zips ? { candidate_zips: options.candidate_zips } : {}),
+      ...(options.excluded_zips ? { excluded_zips: options.excluded_zips } : {}),
+      ...(options.zip_activation_limit ? { zip_activation_limit: options.zip_activation_limit } : {}),
+      ...(options.operator_notes ? { operator_notes: options.operator_notes } : {}),
+    }
+    setAgendaActionLoading(loadingKey)
     setAgendaLoading(true)
     setActionError(null)
     try {
       const res = await fetch(`${MARKETING_API}/marketing-agenda/compose`, {
         method: 'POST',
         headers: adminHeaders,
-        body: JSON.stringify({ force_refresh: forceRefresh }),
+        body: JSON.stringify(requestBody),
       })
       if (!res.ok) throw new Error(await readErrorDetail(res))
       const agenda = await res.json()
       setMarketingAgenda(agenda)
-      setWorkspace('agenda')
-      setActionSuccess(forceRefresh ? 'Fresh marketing agenda composed.' : 'Marketing agenda loaded.')
+      selectWorkspace('agenda')
+      const zip = options.candidate_zips?.[0]
+      setActionSuccess(zip ? `ZIP activation workflow composed for ${zip}.` : options.excluded_zips?.length ? 'Next eligible ZIP activation workflow composed.' : forceRefresh ? 'Fresh marketing agenda composed.' : 'Marketing agenda loaded.')
       setTimeout(() => setActionSuccess(null), 4000)
     } catch (err) {
       setActionError(`Marketing agenda failed: ${err.message}`)
@@ -1116,6 +1283,7 @@ export default function CampaignDashboard() {
       const run = await res.json()
       replaceAgendaRun(run)
       patchMarketingAgendaItemRun(item.agenda_item_id, run.run_id, run.status === 'waiting_for_carlos' ? 'waiting_for_carlos' : 'running')
+      await fetchData()
       setActionSuccess(`Workflow started: ${run.workflow_title}`)
       setTimeout(() => setActionSuccess(null), 5000)
     } catch (err) {
@@ -1160,6 +1328,7 @@ export default function CampaignDashboard() {
       if (!res.ok) throw new Error(await readErrorDetail(res))
       const run = await res.json()
       replaceAgendaRun(run)
+      await fetchData()
       setActionSuccess(`Workflow advanced: ${run.current_step_id || run.status}`)
       setTimeout(() => setActionSuccess(null), 4000)
     } catch (err) {
@@ -1190,6 +1359,7 @@ export default function CampaignDashboard() {
       if (!res.ok) throw new Error(await readErrorDetail(res))
       const run = await res.json()
       replaceAgendaRun(run)
+      await fetchData()
       setActionSuccess(`Agenda decision recorded: ${decision}`)
       setTimeout(() => setActionSuccess(null), 4000)
     } catch (err) {
@@ -1222,7 +1392,7 @@ export default function CampaignDashboard() {
       } catch { /* no-op */ }
     }
     setCanaryZip(zip)
-    setWorkspace('canary')
+    selectWorkspace('canary')
     setCanarySourceCampaign(campaign)
     setTargetGroups(groups => {
       const next = groups.length ? [...groups] : [{ ...EMPTY_TARGET_GROUP }]
@@ -1246,23 +1416,30 @@ export default function CampaignDashboard() {
       {actionSuccess && <div style={{ background: '#0a2a1a', border: '1px solid #00e676', borderRadius: '6px', padding: '10px 14px', marginBottom: '14px', fontSize: '12px', color: '#00e676' }}>{actionSuccess}</div>}
       {actionError && <div style={{ background: '#2a0a0a', border: '1px solid #ff4444', borderRadius: '6px', padding: '10px 14px', marginBottom: '14px', fontSize: '12px', color: '#ff4444' }}>{actionError}</div>}
 
-      <OpsMetricsRow stats={opsStats} />
+      <OpsMetricsRow stats={opsStats} activeWorkspace={workspace} onSelectWorkspace={selectWorkspace} />
       <NextBestActionPanel stats={opsStats} />
 
-      <WorkspaceTabs tabs={workspaceTabs} activeWorkspace={workspace} onSelectWorkspace={setWorkspace} />
+      <WorkspaceTabs tabs={workspaceTabs} activeWorkspace={workspace} onSelectWorkspace={selectWorkspace} />
 
       {workspace === 'agenda' && (
         <TodayAgendaWorkspace
           agenda={marketingAgenda}
           agendaLoading={agendaLoading}
           agendaRuns={agendaRuns}
+          campaigns={allCampaigns}
           hasAdminKey={HAS_MARKETING_ADMIN_KEY}
           onComposeAgenda={handleComposeMarketingAgenda}
           onApproveItem={handleApproveAgendaItem}
           onLoadRun={handleLoadAgendaRun}
+          onOpenDraftReview={handleOpenDraftReviewForZip}
+          onGenerateCreative={handleGenerateAndAttachCreative}
           onRunNextStep={handleRunNextAgendaStep}
           onRecordDecision={handleRecordAgendaDecision}
+          onRequestShareStaging={handleRequestShareStaging}
+          onRequestRelationshipGrowthStaging={handleRequestRelationshipGrowthStaging}
+          zipLoading={zipLoading}
           actionLoading={agendaActionLoading}
+          shareOutcomeActionLoading={outcomeActionLoading}
         />
       )}
 
