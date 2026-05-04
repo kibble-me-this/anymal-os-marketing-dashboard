@@ -176,6 +176,7 @@ export default function CampaignDashboard() {
   const [shareOutcomes, setShareOutcomes] = useState([])
   const [shareOutcomeSummary, setShareOutcomeSummary] = useState({})
   const [nativeVideoJobs, setNativeVideoJobs] = useState([])
+  const [browserTasks, setBrowserTasks] = useState([])
   const [marketingAgenda, setMarketingAgenda] = useState(null)
   const [agendaRuns, setAgendaRuns] = useState({})
   const [activeChannel, setActiveChannel] = useState('all')
@@ -417,6 +418,14 @@ export default function CampaignDashboard() {
         console.error('Failed to fetch native video jobs:', err)
       } finally {
         setNativeVideoLoading(false)
+      }
+      try {
+        const resBrowser = await fetch(`${MARKETING_API}/browser-tasks?limit=100`, { headers: adminHeaders })
+        if (!resBrowser.ok) throw new Error(`${resBrowser.status}`)
+        const jsonBrowser = await resBrowser.json()
+        setBrowserTasks(jsonBrowser.browser_tasks || [])
+      } catch (err) {
+        console.error('Failed to fetch browser tasks:', err)
       }
       setAgendaLoading(true)
       try {
@@ -1037,6 +1046,16 @@ export default function CampaignDashboard() {
     )))
   }
 
+  const replaceBrowserTask = (updatedTask) => {
+    setBrowserTasks(tasks => {
+      const exists = tasks.some(task => task.browser_task_id === updatedTask.browser_task_id)
+      const next = exists
+        ? tasks.map(task => task.browser_task_id === updatedTask.browser_task_id ? updatedTask : task)
+        : [updatedTask, ...tasks]
+      return next.sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))
+    })
+  }
+
   const refreshLoadedAgendaRuns = async () => {
     const runIds = Object.keys(agendaRuns || {})
     if (!runIds.length) return
@@ -1082,36 +1101,101 @@ export default function CampaignDashboard() {
     }
   }
 
-  const handleRequestShareStaging = async (shareOutcomeId) => {
-    await handleUpdateShareOutcome(shareOutcomeId, {
-      status: 'staging_requested',
-      status_reason: 'dashboard_requested_browser_staging',
-      operator_notes: 'Carlos requested browser staging from the marketing agenda.',
-    })
-    setActionSuccess('Browser staging requested. The local desktop runner will stage the Facebook composer and stop before Post.')
-    setTimeout(() => setActionSuccess(null), 5000)
+  const handleRequestShareStaging = async (runOrShareOutcomeId, outcome) => {
+    if (typeof runOrShareOutcomeId === 'string') {
+      setActionError('Browser staging now requires workflow-run context. Open the agenda run and request staging from the active gate.')
+      return
+    }
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Browser staging requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    const run = runOrShareOutcomeId
+    const shareOutcomeId = outcome?.share_outcome_id
+    if (!run?.run_id || !shareOutcomeId) {
+      setActionError('Browser staging requires a workflow run and share outcome.')
+      return
+    }
+    setOutcomeActionLoading(shareOutcomeId)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/browser-tasks`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          task_type: 'zip_share_staging',
+          workflow_run_id: run.run_id,
+          workflow_step_id: 'stage_personal_share',
+          source: 'marketing_dashboard',
+          payload: {
+            share_outcome_id: shareOutcomeId,
+            page_anchor_url: outcome.page_anchor_post_url || outcome.page_anchor_url || '',
+            target_group_url: outcome.group_url || outcome.target_group_url || '',
+            target_group_name: outcome.group_name || outcome.target_group_name || 'Target group',
+            posting_identity: outcome.posting_identity || 'carlos_personal',
+            approved_share_note: outcome.share_note || outcome.approved_share_note || outcome.share_note_used || '',
+          },
+        }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const task = await res.json()
+      replaceBrowserTask(task)
+      setActionSuccess('Shared browser task requested. The local desktop runner will stage the Facebook composer and stop before Post.')
+      setTimeout(() => setActionSuccess(null), 6000)
+      await fetchData()
+      await refreshLoadedAgendaRuns()
+    } catch (err) {
+      setActionError(`Browser task request failed: ${err.message}`)
+    } finally {
+      setOutcomeActionLoading(null)
+    }
   }
 
-  const handleRequestRelationshipGrowthStaging = async (runId) => {
+  const handleRequestRelationshipGrowthStaging = async (runOrRunId) => {
     if (!HAS_MARKETING_ADMIN_KEY) {
       setActionError('Relationship growth staging requires VITE_MARKETING_ADMIN_KEY.')
       return
     }
+    const run = typeof runOrRunId === 'string' ? agendaRuns[runOrRunId] : runOrRunId
+    const runId = run?.run_id || runOrRunId
+    if (!run?.run_id) {
+      setActionError('Relationship growth staging requires the loaded workflow run.')
+      return
+    }
+    const browserBrief = (run.steps || []).find(step => step.step_id === 'prepare_growth_browser_brief')?.result || {}
+    const inventory = (run.steps || []).find(step => step.step_id === 'review_relationship_inventory')?.result || {}
     setAgendaActionLoading(`relationship-stage:${runId}`)
     setActionError(null)
     try {
-      const res = await fetch(`${MARKETING_API}/marketing-agenda/runs/${runId}/relationship-growth/staging-request`, {
+      const res = await fetch(`${MARKETING_API}/browser-tasks`, {
         method: 'POST',
         headers: adminHeaders,
-        body: JSON.stringify({ operator_notes: 'Carlos requested autonomous relationship-growth browser staging from the dashboard.' }),
+        body: JSON.stringify({
+          task_type: 'relationship_discovery',
+          workflow_run_id: runId,
+          workflow_step_id: 'stage_growth_browser_session',
+          source: 'marketing_dashboard',
+          payload: {
+            browser_start_url: browserBrief.browser_start_url || run.linked_entities?.browser_start_url || 'https://www.facebook.com/search/groups/?q=cattle%20prices',
+            objective: browserBrief.objective || 'Find cattle-relevant Facebook groups, pages, posts, and operators for Carlos review.',
+            allowed_browser_actions: browserBrief.allowed_browser_actions || [],
+            hard_stops: browserBrief.hard_stops || [],
+            candidate_output_fields: browserBrief.candidate_output_fields || [],
+            search_terms: browserBrief.search_terms || run.linked_entities?.search_terms || [],
+            known_targets: inventory.known_group_targets || run.linked_entities?.known_group_targets || [],
+            operator_context: run.linked_entities || {},
+          },
+        }),
       })
       if (!res.ok) throw new Error(await readErrorDetail(res))
-      const run = await res.json()
-      setAgendaRuns(map => ({ ...map, [run.run_id]: run }))
-      setActionSuccess('Relationship-growth browser staging requested. The local desktop runner will inspect Facebook and stop before any live action.')
+      const task = await res.json()
+      replaceBrowserTask(task)
+      setActionSuccess('Relationship-growth browser task requested. The local desktop runner will inspect Facebook and stop before any live action.')
       setTimeout(() => setActionSuccess(null), 6000)
+      await fetchData()
+      await refreshLoadedAgendaRuns()
     } catch (err) {
-      setActionError(`Relationship-growth staging request failed: ${err.message}`)
+      setActionError(`Relationship-growth browser task failed: ${err.message}`)
     } finally {
       setAgendaActionLoading(null)
     }
@@ -1429,6 +1513,7 @@ export default function CampaignDashboard() {
           agenda={marketingAgenda}
           agendaLoading={agendaLoading}
           agendaRuns={agendaRuns}
+          browserTasks={browserTasks}
           campaigns={allCampaigns}
           hasAdminKey={HAS_MARKETING_ADMIN_KEY}
           onComposeAgenda={handleComposeMarketingAgenda}

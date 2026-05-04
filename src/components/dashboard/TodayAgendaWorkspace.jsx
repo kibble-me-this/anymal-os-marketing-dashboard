@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import BrowserTaskStagePanel from './BrowserTaskStagePanel'
 
 const MONO_FONT = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
 const SANS_FONT = "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
@@ -16,6 +17,8 @@ const RELATIONSHIP_STAGING_ACTIVE_STATUSES = new Set([
   'staging_requested',
   'staging_in_progress',
 ])
+const BROWSER_TASK_READY_STATUS = 'staged_for_operator_review'
+const BROWSER_TASK_ACTIVE_STATUSES = new Set(['requested', 'picked_up', 'browser_opened', 'in_progress'])
 const WORKFLOW_LABELS = {
   relationship_growth: 'Relationship growth',
   zip_price_activation: 'ZIP launch',
@@ -215,7 +218,19 @@ function stepResult(run, stepId) {
   return (run?.steps || []).find(step => step.step_id === stepId)?.result || null
 }
 
-function gateEvidenceState(run, activeGate, campaigns) {
+function tasksForRun(browserTasks = [], run, taskType) {
+  const runId = run?.run_id
+  if (!runId) return []
+  return (browserTasks || [])
+    .filter(task => task.workflow_run_id === runId && (!taskType || task.task_type === taskType))
+    .sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))
+}
+
+function latestTask(browserTasks = [], run, taskType) {
+  return tasksForRun(browserTasks, run, taskType)[0] || null
+}
+
+function gateEvidenceState(run, activeGate, campaigns, browserTasks = []) {
   const zip = run?.linked_entities?.zip
   const gateId = activeGate?.step_id
   if (gateId === 'review_launch_package') {
@@ -255,11 +270,12 @@ function gateEvidenceState(run, activeGate, campaigns) {
     const stageResult = stepResult(run, 'stage_personal_share')
     const outcomes = Array.isArray(stageResult?.share_outcomes) ? stageResult.share_outcomes : []
     const stagedCount = outcomes.filter(outcome => SHARE_STAGE_READY_STATUSES.has(outcome.status)).length
+    const taskReady = latestTask(browserTasks, run, 'zip_share_staging')?.status === BROWSER_TASK_READY_STATUS
     return {
-      blocked: stagedCount < 1,
-      message: stagedCount > 0
+      blocked: stagedCount < 1 && !taskReady,
+      message: stagedCount > 0 || taskReady
         ? ''
-        : 'The Facebook composer has not been staged yet. Request browser staging, then wait for the local desktop runner to mark the share staged_for_operator_review before approving Post.',
+        : 'The Facebook composer has not been staged yet. Request browser staging, then wait for the shared browser task to report staged_for_operator_review before approving Post.',
     }
   }
   if (gateId === 'stage_growth_browser_session') {
@@ -271,9 +287,11 @@ function gateEvidenceState(run, activeGate, campaigns) {
   if (gateId === 'approve_join_follow_comment_actions') {
     const stageResult = stepResult(run, 'stage_growth_browser_session')
     const candidateCount = Number(stageResult?.candidate_count || (Array.isArray(stageResult?.candidates) ? stageResult.candidates.length : 0))
+    const relationshipTask = latestTask(browserTasks, run, 'relationship_discovery')
+    const taskCandidateCount = Array.isArray(relationshipTask?.result?.candidates) ? relationshipTask.result.candidates.length : 0
     return {
-      blocked: stageResult?.staging_status !== RELATIONSHIP_STAGE_READY_STATUS || candidateCount < 1,
-      message: stageResult?.staging_status === RELATIONSHIP_STAGE_READY_STATUS && candidateCount > 0
+      blocked: (stageResult?.staging_status !== RELATIONSHIP_STAGE_READY_STATUS || candidateCount < 1) && !(relationshipTask?.status === BROWSER_TASK_READY_STATUS && taskCandidateCount > 0),
+      message: (stageResult?.staging_status === RELATIONSHIP_STAGE_READY_STATUS && candidateCount > 0) || (relationshipTask?.status === BROWSER_TASK_READY_STATUS && taskCandidateCount > 0)
         ? ''
         : 'Relationship candidates must be staged by the desktop browser runner before Carlos can approve any action recommendations.',
     }
@@ -292,13 +310,14 @@ function RunControls({
   onRecordDecision,
   onRequestShareStaging,
   onRequestRelationshipGrowthStaging,
+  browserTasks,
   actionLoading,
   shareOutcomeActionLoading,
 }) {
   const [notes, setNotes] = useState('')
   const stepId = activeGate?.step_id || run?.current_step_id || ''
   const isLoading = actionLoading === `run:${run?.run_id}` || actionLoading === `decision:${run?.run_id}`
-  const gateEvidence = gateEvidenceState(run, activeGate, launchPackageCampaigns)
+  const gateEvidence = gateEvidenceState(run, activeGate, launchPackageCampaigns, browserTasks)
   const positiveDecisionDisabled = isLoading || !stepId || gateEvidence.blocked
 
   if (!run) return null
@@ -342,6 +361,7 @@ function RunControls({
       {(activeGate?.step_id === 'stage_personal_share' || activeGate?.step_id === 'click_post') && (
         <PersonalShareStageReview
           run={run}
+          browserTasks={browserTasks}
           onRequestShareStaging={onRequestShareStaging}
           shareOutcomeActionLoading={shareOutcomeActionLoading}
         />
@@ -350,6 +370,7 @@ function RunControls({
       {(activeGate?.step_id === 'stage_growth_browser_session' || activeGate?.step_id === 'approve_join_follow_comment_actions') && (
         <RelationshipGrowthStageReview
           run={run}
+          browserTasks={browserTasks}
           onRequestRelationshipGrowthStaging={onRequestRelationshipGrowthStaging}
           actionLoading={actionLoading}
         />
@@ -572,11 +593,73 @@ function DistributionGateReview({ run }) {
   )
 }
 
-function PersonalShareStageReview({ run, onRequestShareStaging, shareOutcomeActionLoading }) {
+function renderZipTaskResult(result) {
+  return (
+    <div style={{ display: 'grid', gap: '6px', color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT }}>
+      <div>share_outcome_id: {result.share_outcome_id || 'unknown'}</div>
+      <div>target_group_name: {result.target_group_name || 'unknown'}</div>
+      <div>posting_identity: {result.posting_identity || 'carlos_personal'}</div>
+      {result.page_anchor_url && <a href={result.page_anchor_url} target="_blank" rel="noopener noreferrer" style={{ color: '#00e676', wordBreak: 'break-all' }}>page_anchor_url: {result.page_anchor_url}</a>}
+      {result.target_group_url && <a href={result.target_group_url} target="_blank" rel="noopener noreferrer" style={{ color: '#00e676', wordBreak: 'break-all' }}>target_group_url: {result.target_group_url}</a>}
+      {result.approved_share_note && (
+        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#c8f7c8', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
+          {result.approved_share_note}
+        </pre>
+      )}
+      {result.browser_observation && <div style={{ color: '#c8f7c8', lineHeight: 1.4 }}>{result.browser_observation}</div>}
+    </div>
+  )
+}
+
+function renderRelationshipTaskResult(result) {
+  const candidates = Array.isArray(result.candidates) ? result.candidates : []
+  return (
+    <div style={{ display: 'grid', gap: '8px' }}>
+      {Array.isArray(result.searched_queries) && result.searched_queries.length > 0 && (
+        <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT }}>
+          searched_queries: {result.searched_queries.join(', ')}
+        </div>
+      )}
+      {result.browser_observation && <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>{result.browser_observation}</div>}
+      {candidates.map((candidate, index) => (
+        <article key={`${candidate.url || candidate.name || index}`} style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '10px', display: 'grid', gap: '7px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', alignItems: 'start' }}>
+            <div>
+              <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 700 }}>{candidate.name || 'Candidate surface'}</div>
+              <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT, marginTop: '3px' }}>{candidate.surface_type || 'surface'} | {candidate.recommended_action || 'review_only'}</div>
+            </div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <StatusPill tone={candidate.already_known ? '#ffd54f' : '#00e676'}>{candidate.already_known ? 'known' : 'new'}</StatusPill>
+              {candidate.risk_level && <StatusPill tone={candidate.risk_level === 'low' ? '#00e676' : '#ffd54f'}>{candidate.risk_level}</StatusPill>}
+            </div>
+          </div>
+          {candidate.url && <a href={candidate.url} target="_blank" rel="noopener noreferrer" style={{ color: '#00e676', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>{candidate.url}</a>}
+          {candidate.source_query && <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT }}>source_query: {candidate.source_query}</div>}
+          {candidate.why_relevant && <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>{candidate.why_relevant}</div>}
+          {candidate.suggested_text && (
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#c8f7c8', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
+              {candidate.suggested_text}
+            </pre>
+          )}
+          {Array.isArray(candidate.risk_flags) && candidate.risk_flags.length > 0 && (
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {candidate.risk_flags.map(flag => <StatusPill key={flag} tone="#ffd54f">{flag}</StatusPill>)}
+            </div>
+          )}
+        </article>
+      ))}
+    </div>
+  )
+}
+
+function PersonalShareStageReview({ run, browserTasks = [], onRequestShareStaging, shareOutcomeActionLoading }) {
   const stage = stepResult(run, 'stage_personal_share')
   const outcomes = Array.isArray(stage?.share_outcomes) ? stage.share_outcomes : []
+  const requestOutcome = outcomes.find(outcome => !SHARE_STAGE_READY_STATUSES.has(outcome.status)) || outcomes[0] || null
   const stagedCount = outcomes.filter(outcome => SHARE_STAGE_READY_STATUSES.has(outcome.status)).length
   const requestedCount = outcomes.filter(outcome => SHARE_STAGING_ACTIVE_STATUSES.has(outcome.status)).length
+  const tasks = tasksForRun(browserTasks, run, 'zip_share_staging')
+  const taskActive = tasks.some(task => BROWSER_TASK_ACTIVE_STATUSES.has(task.status))
   return (
     <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
       <div>
@@ -590,6 +673,16 @@ function PersonalShareStageReview({ run, onRequestShareStaging, shareOutcomeActi
       <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
         Request staging here. The local desktop runner opens the browser-capable agent, fills the Facebook composer, and stops before Post. Carlos clicks Post only after reviewing destination, identity, and copy.
       </div>
+      <BrowserTaskStagePanel
+        title="ZIP share composer staging"
+        description="This shared browser task asks the local desktop runner to stage the Facebook composer and stop before Post."
+        tasks={tasks}
+        requestLabel="Request shared browser staging"
+        requestDisabled={!outcomes.length || taskActive}
+        requestLoading={Boolean(shareOutcomeActionLoading)}
+        onRequest={() => requestOutcome && onRequestShareStaging?.(run, requestOutcome)}
+        renderResult={renderZipTaskResult}
+      />
       {outcomes.length > 0 && stagedCount === 0 && (
         <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#2a2100', color: '#ffe58a', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
           Step 9 stays blocked until the browser runner changes the share outcome to staged_for_operator_review.
@@ -619,11 +712,11 @@ function PersonalShareStageReview({ run, onRequestShareStaging, shareOutcomeActi
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
               <button
                 type="button"
-                onClick={() => onRequestShareStaging?.(outcome.share_outcome_id)}
-                disabled={!onRequestShareStaging || shareOutcomeActionLoading === outcome.share_outcome_id || SHARE_STAGING_ACTIVE_STATUSES.has(outcome.status)}
-                style={buttonStyle({ filled: true, disabled: !onRequestShareStaging || shareOutcomeActionLoading === outcome.share_outcome_id || SHARE_STAGING_ACTIVE_STATUSES.has(outcome.status) })}
+                onClick={() => onRequestShareStaging?.(run, outcome)}
+                disabled={!onRequestShareStaging || shareOutcomeActionLoading === outcome.share_outcome_id || SHARE_STAGING_ACTIVE_STATUSES.has(outcome.status) || taskActive}
+                style={buttonStyle({ disabled: !onRequestShareStaging || shareOutcomeActionLoading === outcome.share_outcome_id || SHARE_STAGING_ACTIVE_STATUSES.has(outcome.status) || taskActive })}
               >
-                {SHARE_STAGING_ACTIVE_STATUSES.has(outcome.status) ? 'Staging requested' : 'Request browser staging'}
+                {SHARE_STAGING_ACTIVE_STATUSES.has(outcome.status) || taskActive ? 'Staging requested' : 'Request for this target'}
               </button>
               <span style={{ color: '#8abf8a', fontSize: '11px', lineHeight: 1.35 }}>
                 The desktop runner will stage the Facebook composer and stop before Post.
@@ -641,13 +734,18 @@ function PersonalShareStageReview({ run, onRequestShareStaging, shareOutcomeActi
   )
 }
 
-function RelationshipGrowthStageReview({ run, onRequestRelationshipGrowthStaging, actionLoading }) {
+function RelationshipGrowthStageReview({ run, browserTasks = [], onRequestRelationshipGrowthStaging, actionLoading }) {
   const stage = stepResult(run, 'stage_growth_browser_session') || {}
   const status = stage.staging_status || 'not_requested'
   const candidates = Array.isArray(stage.candidates) ? stage.candidates : []
+  const tasks = tasksForRun(browserTasks, run, 'relationship_discovery')
+  const latestSharedTask = tasks[0] || null
   const active = RELATIONSHIP_STAGING_ACTIVE_STATUSES.has(status)
-  const ready = status === RELATIONSHIP_STAGE_READY_STATUS
-  const canRequest = Boolean(run?.run_id && onRequestRelationshipGrowthStaging && !active)
+  const sharedActive = latestSharedTask && BROWSER_TASK_ACTIVE_STATUSES.has(latestSharedTask.status)
+  const sharedCandidates = Array.isArray(latestSharedTask?.result?.candidates) ? latestSharedTask.result.candidates : []
+  const ready = status === RELATIONSHIP_STAGE_READY_STATUS || (latestSharedTask?.status === BROWSER_TASK_READY_STATUS && sharedCandidates.length > 0)
+  const visibleCandidateCount = candidates.length || sharedCandidates.length
+  const canRequest = Boolean(run?.run_id && onRequestRelationshipGrowthStaging && !active && !sharedActive)
   return (
     <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'start', flexWrap: 'wrap' }}>
@@ -655,7 +753,7 @@ function RelationshipGrowthStageReview({ run, onRequestRelationshipGrowthStaging
           <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Relationship browser staging</div>
           <div style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700, marginTop: '4px' }}>
             {ready
-              ? `${candidates.length} candidate${candidates.length === 1 ? '' : 's'} staged for Carlos review`
+              ? `${visibleCandidateCount} candidate${visibleCandidateCount === 1 ? '' : 's'} staged for Carlos review`
               : active
                 ? 'Desktop runner requested'
                 : 'No browser candidate pass staged yet'}
@@ -668,29 +766,16 @@ function RelationshipGrowthStageReview({ run, onRequestRelationshipGrowthStaging
       <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
         The desktop runner uses the same Codex Computer Use path as ZIP share staging, but this workflow only discovers and drafts recommendations. It must not join, follow, like, comment, share, or post.
       </div>
-      {!ready && (
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <button
-            type="button"
-            onClick={() => onRequestRelationshipGrowthStaging?.(run.run_id)}
-            disabled={!canRequest || actionLoading === `relationship-stage:${run?.run_id}`}
-            style={buttonStyle({ filled: true, disabled: !canRequest || actionLoading === `relationship-stage:${run?.run_id}` })}
-          >
-            {active ? 'Staging requested' : 'Request relationship browser pass'}
-          </button>
-          <span style={{ color: '#8abf8a', fontSize: '11px', lineHeight: 1.35 }}>
-            The local desktop runner will inspect Facebook and return candidates for review.
-          </span>
-        </div>
-      )}
-      {stage.desktop_bridge_command && (
-        <div style={{ display: 'grid', gap: '5px' }}>
-          <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Desktop bridge command</div>
-          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#c8f7c8', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
-            {stage.desktop_bridge_command}
-          </pre>
-        </div>
-      )}
+      <BrowserTaskStagePanel
+        title="Relationship discovery pass"
+        description="This shared browser task should run search-first discovery and return candidate groups, pages, posts, or profiles for Carlos review."
+        tasks={tasks}
+        requestLabel="Request relationship browser pass"
+        requestDisabled={!canRequest}
+        requestLoading={actionLoading === `relationship-stage:${run?.run_id}`}
+        onRequest={() => onRequestRelationshipGrowthStaging?.(run)}
+        renderResult={renderRelationshipTaskResult}
+      />
       {stage.agent_notes && (
         <div style={{ color: status === 'staging_failed' ? '#ffb3b3' : '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
           {stage.agent_notes}
@@ -870,6 +955,7 @@ export default function TodayAgendaWorkspace({
   agenda,
   agendaLoading,
   agendaRuns,
+  browserTasks = [],
   campaigns,
   hasAdminKey,
   onComposeAgenda,
@@ -1156,6 +1242,7 @@ export default function TodayAgendaWorkspace({
             onRecordDecision={onRecordDecision}
             onRequestShareStaging={onRequestShareStaging}
             onRequestRelationshipGrowthStaging={onRequestRelationshipGrowthStaging}
+            browserTasks={browserTasks}
             actionLoading={actionLoading}
             shareOutcomeActionLoading={shareOutcomeActionLoading}
           />
