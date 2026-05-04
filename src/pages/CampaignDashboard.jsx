@@ -1286,6 +1286,7 @@ export default function CampaignDashboard() {
       await fetchData()
       setActionSuccess(`Workflow started: ${run.workflow_title}`)
       setTimeout(() => setActionSuccess(null), 5000)
+      return run
     } catch (err) {
       setActionError(`Agenda workflow failed: ${err.message}`)
       throw err
@@ -1304,7 +1305,9 @@ export default function CampaignDashboard() {
     try {
       const res = await fetch(`${MARKETING_API}/marketing-agenda/runs/${runId}`, { headers: adminHeaders })
       if (!res.ok) throw new Error(await readErrorDetail(res))
-      replaceAgendaRun(await res.json())
+      const run = await res.json()
+      replaceAgendaRun(run)
+      return run
     } catch (err) {
       setActionError(`Agenda run load failed: ${err.message}`)
       throw err

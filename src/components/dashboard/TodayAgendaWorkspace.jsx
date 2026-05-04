@@ -906,6 +906,11 @@ export default function TodayAgendaWorkspace({
   }, [activeRun?.linked_entities?.zip, campaigns, selectedItem?.linked_entities?.zip])
   const canGo = Boolean(hasAdminKey && selectedItem && selectedItem.status !== 'completed')
   const isApproving = selectedItem && actionLoading === `approve:${selectedItem.agenda_item_id}`
+  const isLoadingRun = selectedItem?.active_run_id && actionLoading === `load:${selectedItem.active_run_id}`
+  const primaryActionLoading = Boolean(isApproving || isLoadingRun)
+  const primaryActionLabel = primaryActionLoading
+    ? activeRun ? 'Opening...' : selectedItem?.active_run_id ? 'Loading...' : 'Starting...'
+    : activeRun ? 'Review gate' : selectedItem?.active_run_id ? 'Load run' : 'Go'
   const normalizedActivationZip = activationZip.trim()
   const activationZipValid = /^\d{5}$/.test(normalizedActivationZip)
   const activationLoading = actionLoading === 'compose:zip'
@@ -929,6 +934,20 @@ export default function TodayAgendaWorkspace({
     operator_notes: 'Carlos requested the daily relationship growth workflow.',
     loadingKey: 'compose:relationship',
   })
+  const handlePrimaryAction = async () => {
+    if (!selectedItem) return
+    if (activeRun) {
+      setRunModalOpen(true)
+      return
+    }
+    if (selectedItem.active_run_id) {
+      const run = await onLoadRun(selectedItem.active_run_id)
+      if (run) setRunModalOpen(true)
+      return
+    }
+    const run = await onApproveItem(selectedItem)
+    if (run) setRunModalOpen(true)
+  }
 
   return (
     <div style={{ display: 'grid', gap: '14px' }}>
@@ -1076,8 +1095,8 @@ export default function TodayAgendaWorkspace({
                         Load run
                       </button>
                     )}
-                    <button type="button" onClick={() => onApproveItem(selectedItem)} disabled={!canGo || isApproving} style={buttonStyle({ filled: true, disabled: !canGo || isApproving })}>
-                      {isApproving ? 'Starting...' : 'Go'}
+                    <button type="button" onClick={handlePrimaryAction} disabled={!canGo || primaryActionLoading} style={buttonStyle({ filled: true, disabled: !canGo || primaryActionLoading })}>
+                      {primaryActionLabel}
                     </button>
                   </div>
                 </div>
