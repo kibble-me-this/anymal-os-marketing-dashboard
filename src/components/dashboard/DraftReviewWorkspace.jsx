@@ -11,6 +11,7 @@ const CHANNEL_COLORS = {
   facebook_reply: '#1877F2',
 }
 
+const LINKEDIN_CHANNELS = new Set(['anymal_linkedin', 'personal_linkedin'])
 const MONO_FONT = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
 const SANS_FONT = "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024
@@ -192,6 +193,7 @@ function InlineEditor({ campaign, onSaved, onCancel }) {
   const [imageError, setImageError] = useState(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState(null)
+  const isLinkedInChannel = LINKEDIN_CHANNELS.has(campaign.channel)
   const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
 
@@ -349,6 +351,11 @@ function InlineEditor({ campaign, onSaved, onCancel }) {
 
       <div>
         <div style={labelStyle}>Image</div>
+        {isLinkedInChannel && (
+          <div style={{ background: '#0a2238', border: '1px solid #0A66C2', borderRadius: '4px', padding: '8px 10px', color: '#b7d8ff', fontSize: '11px', lineHeight: 1.45, marginBottom: '8px', fontFamily: SANS_FONT }}>
+            LinkedIn publish ignores attached images. Post will be text-only until image support ships.
+          </div>
+        )}
         {previewImageSrc ? (
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '8px' }}>
             <img src={previewImageSrc} alt="campaign chart" style={{ width: '200px', height: 'auto', border: '1px solid #1a3a2a', borderRadius: '4px' }} />

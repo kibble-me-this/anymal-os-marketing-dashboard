@@ -31,6 +31,7 @@ const CHANNEL_DESTINATION_NAME = {
   facebook_reply: 'Facebook',
 }
 
+const LINKEDIN_CHANNELS = new Set(['anymal_linkedin', 'personal_linkedin'])
 const URL_PATTERN = /https?:\/\/world\.anymalos\.com\/[^\s)]*/
 
 function extractUrl(message) {
@@ -162,6 +163,7 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
   const channelColor = CHANNEL_COLORS[channel] || '#00e676'
   const channelLabel = CHANNEL_LABELS[channel] || campaign.channel_label || channel
   const destName = CHANNEL_DESTINATION_NAME[channel] || 'the destination platform'
+  const isLinkedInChannel = LINKEDIN_CHANNELS.has(channel)
 
   const message = campaign.message || campaign.generated_copy || ''
   const attachedImage = resolveAttachedImage(campaign)
@@ -178,6 +180,12 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
         text: 'No image attached. Facebook posts without images typically get 50% less reach. Are you sure?',
       })
     }
+    if (isLinkedInChannel) {
+      list.push({
+        level: 'warn',
+        text: 'Text-only post. Images shown in the draft preview are NOT attached when publishing to LinkedIn at this time.',
+      })
+    }
     if (utmCampaign === 'content_agent') {
       list.push({
         level: 'warn',
@@ -191,7 +199,7 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
       })
     }
     return list
-  }, [channel, hasAttachedImage, utmCampaign, message])
+  }, [channel, hasAttachedImage, isLinkedInChannel, utmCampaign, message])
 
   const handleConfirm = async () => {
     setError(null)
