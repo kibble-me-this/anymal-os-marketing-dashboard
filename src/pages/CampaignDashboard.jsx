@@ -490,14 +490,18 @@ export default function CampaignDashboard() {
     setPendingConfirm(campaign)
   }
 
-  const handleConfirmPublish = async () => {
+  const handleConfirmPublish = async (approvalPayload = {}) => {
     if (!pendingConfirm) return
     const campaignId = pendingConfirm.campaign_id
     setConfirmLoading(true)
     setActionLoading(campaignId)
     setActionError(null)
     try {
-      const res = await fetch(`${MARKETING_API}/campaigns/${campaignId}/approve`, { method: 'POST', headers })
+      const res = await fetch(`${MARKETING_API}/campaigns/${campaignId}/approve`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify(approvalPayload),
+      })
       if (!res.ok) {
         throw new Error(await readErrorDetail(res))
       }
