@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ReplyTargetContext from './ReplyTargetContext'
+import { campaignFreshnessGate, freshnessLabel, freshnessTone, freshnessTooltip, requiresFreshnessAcknowledgment } from './dashboard/freshness'
 
 const MONO_FONT = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
 const SANS_FONT = "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
@@ -116,6 +117,7 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
   const dialogRef = useRef(null)
   const previousFocusRef = useRef(null)
   const [error, setError] = useState(null)
+  const [freshnessAcknowledged, setFreshnessAcknowledged] = useState(false)
 
   useEffect(() => {
     previousFocusRef.current = document.activeElement
@@ -171,6 +173,9 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
   const url = extractUrl(message)
   const parsedUrl = parseUrl(url)
   const utmCampaign = parsedUrl?.searchParams.get('utm_campaign') || ''
+  const freshnessGate = campaignFreshnessGate(campaign)
+  const needsFreshnessAck = requiresFreshnessAcknowledgment(campaign)
+  const publishDisabled = loading || (needsFreshnessAck && !freshnessAcknowledged)
 
   const warnings = useMemo(() => {
     const list = []
@@ -198,13 +203,27 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
         text: 'Message contains an em dash. Brand guideline says no em dashes.',
       })
     }
+    if (needsFreshnessAck) {
+      list.push({
+        level: 'warn',
+        text: freshnessTooltip(freshnessGate),
+      })
+    }
     return list
-  }, [channel, hasAttachedImage, isLinkedInChannel, utmCampaign, message])
+  }, [channel, freshnessGate, hasAttachedImage, isLinkedInChannel, message, needsFreshnessAck, utmCampaign])
 
   const handleConfirm = async () => {
     setError(null)
+    if (needsFreshnessAck && !freshnessAcknowledged) {
+      setError('Acknowledge stale nearby data before publishing this campaign.')
+      return
+    }
     try {
-      await onConfirm()
+      await onConfirm(needsFreshnessAck ? {
+        stale_acknowledged: true,
+        acknowledged_at: new Date().toISOString(),
+        acknowledged_by: 'carlos',
+      } : {})
     } catch (err) {
       setError(err.message || 'Publish failed.')
     }
@@ -378,8 +397,40 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
 
             <dt style={{ color: 'rgba(255,255,255,0.55)' }}>Character count</dt>
             <dd style={{ margin: 0, color: '#c0e0c0' }}>{countCharacters(message)}</dd>
+
+            <dt style={{ color: 'rgba(255,255,255,0.55)' }}>Data freshness</dt>
+            <dd style={{ margin: 0, color: freshnessTone(freshnessGate) }}>
+              {freshnessGate ? freshnessLabel(freshnessGate) : 'Unknown'}
+            </dd>
           </dl>
         </div>
+
+        {needsFreshnessAck && (
+          <label
+            style={{
+              display: 'flex',
+              gap: '10px',
+              alignItems: 'flex-start',
+              marginBottom: '18px',
+              padding: '10px 12px',
+              border: '1px solid #ffd54f',
+              borderRadius: '4px',
+              background: 'rgba(255, 213, 79, 0.08)',
+              color: '#ffe58a',
+              fontSize: '12px',
+              lineHeight: 1.5,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={freshnessAcknowledged}
+              onChange={(event) => setFreshnessAcknowledged(event.target.checked)}
+              disabled={loading}
+              style={{ marginTop: '2px' }}
+            />
+            <span>Acknowledge stale data and approve anyway. {freshnessTooltip(freshnessGate)}</span>
+          </label>
+        )}
 
         {warnings.length > 0 && (
           <div style={{ marginBottom: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -446,22 +497,22 @@ export default function ApproveConfirmModal({ campaign, onConfirm, onCancel, loa
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={loading}
+            disabled={publishDisabled}
             style={{
               padding: '10px 22px',
-              background: loading ? '#1a3a2a' : '#ff5252',
-              color: '#ffffff',
-              border: 'none',
+              background: publishDisabled ? 'rgba(255, 213, 79, 0.18)' : needsFreshnessAck ? '#ffd54f' : '#ff5252',
+              color: publishDisabled ? 'rgba(255,255,255,0.55)' : needsFreshnessAck ? '#021a0e' : '#ffffff',
+              border: publishDisabled ? '1px solid rgba(255, 213, 79, 0.35)' : '1px solid transparent',
               borderRadius: '4px',
               fontSize: '11px',
               letterSpacing: '0.12em',
               textTransform: 'uppercase',
               fontWeight: 700,
-              cursor: loading ? 'not-allowed' : 'pointer',
+              cursor: publishDisabled ? 'not-allowed' : 'pointer',
               fontFamily: SANS_FONT,
             }}
           >
-            {loading ? 'Publishing...' : 'Publish Now'}
+            {loading ? 'Publishing...' : needsFreshnessAck ? 'Acknowledge And Publish' : 'Publish Now'}
           </button>
         </div>
       </div>

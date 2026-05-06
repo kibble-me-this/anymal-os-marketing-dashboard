@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HAS_MARKETING_ADMIN_KEY, MARKETING_API, headers } from '../../config'
 import ReplyTargetContext from '../ReplyTargetContext'
+import { campaignFreshnessGate, freshnessLabel, freshnessTone, freshnessTooltip, requiresFreshnessAcknowledgment } from './freshness'
 
 const CHANNEL_COLORS = {
   facebook_page: '#1877F2',
@@ -151,6 +152,19 @@ function statusPillFor(value, { compact = false } = {}) {
   }
   const label = labels[normalized] || normalized.replaceAll('_', ' ')
   return <span style={{ ...pillStyle(colors[normalized] || '#4a7a5a'), fontSize: compact ? '9px' : '10px' }}>{label}</span>
+}
+
+function freshnessPillFor(campaign, { compact = false } = {}) {
+  const gate = campaignFreshnessGate(campaign)
+  if (!gate) return null
+  return (
+    <span
+      title={freshnessTooltip(gate)}
+      style={{ ...pillStyle(freshnessTone(gate)), fontSize: compact ? '9px' : '10px' }}
+    >
+      {freshnessLabel(gate)}
+    </span>
+  )
 }
 
 function smallButtonStyle({ filled = false, danger = false, disabled = false } = {}) {
@@ -401,6 +415,7 @@ function CampaignCard({
   const channelColor = CHANNEL_COLORS[campaign.channel] || '#00e676'
   const isLoading = actionLoading === campaign.campaign_id
   const isManualOnly = !canApproveCampaign(campaign)
+  const needsFreshnessAck = requiresFreshnessAcknowledgment(campaign)
 
   const handleSaved = (patch) => {
     onPatched(campaign.campaign_id, patch)
@@ -427,6 +442,8 @@ function CampaignCard({
             {campaign.topic_angle && <span style={{ fontSize: '10px', color: '#4a7a5a' }}>{campaign.topic_angle}</span>}
             <span style={{ fontSize: '10px', color: '#4a7a5a' }}>{formatDate(campaign.created_at)}</span>
             {campaign.updated_at && <span style={{ fontSize: '10px', color: '#00e676' }}>edited {formatDate(campaign.updated_at)}</span>}
+            {freshnessPillFor(campaign)}
+            {needsFreshnessAck && <span style={pillStyle('#ffd54f')}>Ack Required</span>}
           </div>
         </div>
       </div>
@@ -445,7 +462,7 @@ function CampaignCard({
             <button type="button" onClick={() => onIncludeInCanary(campaign)} disabled={isLoading || editing} style={{ padding: '8px 20px', background: (isLoading || editing) ? '#1a3a2a' : '#00e676', color: '#021a0e', border: 'none', borderRadius: '4px', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', cursor: (isLoading || editing) ? 'not-allowed' : 'pointer', fontFamily: SANS_FONT, fontWeight: '600' }}>Include in Canary Job</button>
           </>
         ) : (
-          <button type="button" onClick={() => onRequestApprove(campaign)} disabled={isLoading || editing} style={{ padding: '8px 20px', background: (isLoading || editing) ? '#1a3a2a' : '#00e676', color: '#021a0e', border: 'none', borderRadius: '4px', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', cursor: (isLoading || editing) ? 'not-allowed' : 'pointer', fontFamily: SANS_FONT, fontWeight: '600' }}>{isLoading ? 'Publishing...' : 'Approve'}</button>
+          <button type="button" onClick={() => onRequestApprove(campaign)} disabled={isLoading || editing} style={{ padding: '8px 20px', background: (isLoading || editing) ? '#1a3a2a' : needsFreshnessAck ? '#ffd54f' : '#00e676', color: '#021a0e', border: 'none', borderRadius: '4px', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', cursor: (isLoading || editing) ? 'not-allowed' : 'pointer', fontFamily: SANS_FONT, fontWeight: '600' }}>{isLoading ? 'Publishing...' : needsFreshnessAck ? 'Review Freshness' : 'Approve'}</button>
         )}
         <button type="button" onClick={() => onReject(campaign.campaign_id)} disabled={isLoading || editing} style={{ padding: '8px 20px', background: 'transparent', color: '#ff4444', border: '1px solid #ff4444', borderRadius: '4px', fontSize: '11px', letterSpacing: '0.08em', textTransform: 'uppercase', cursor: (isLoading || editing) ? 'not-allowed' : 'pointer', fontFamily: SANS_FONT }}>Reject</button>
       </div>
@@ -540,6 +557,7 @@ function ZipCampaignCard({
   const place = [group.city, group.county, group.state].filter(Boolean).join(', ')
   const needsCreativeReview = group.zipStatus === 'needs_creative_review'
   const creativeReady = group.creativeStatus === 'creative_current'
+  const freshnessGate = group.campaigns.map(campaign => campaignFreshnessGate(campaign)).find(Boolean)
   const helperMessage = needsCreativeReview && group.campaigns.length > 1
     ? creativeReady
       ? `${group.campaigns.length} drafts at this ZIP are ready for copy and Page-anchor review.`
@@ -554,6 +572,11 @@ function ZipCampaignCard({
             <h3 style={{ fontSize: '13px', color: '#e0ffe0', margin: 0, fontWeight: 600 }}>{isOther ? 'Other drafts' : `ZIP ${group.zip}`}</h3>
             {!isOther && statusPillFor(group.zipStatus)}
             {!isOther && statusPillFor(group.creativeStatus, { compact: true })}
+            {!isOther && freshnessGate && (
+              <span title={freshnessTooltip(freshnessGate)} style={{ ...pillStyle(freshnessTone(freshnessGate)), fontSize: '9px' }}>
+                {freshnessLabel(freshnessGate)}
+              </span>
+            )}
           </div>
           <div style={{ color: '#4a7a5a', fontSize: '11px', fontFamily: MONO_FONT }}>{place || (isOther ? 'No ZIP detected' : 'Place metadata not available')} | {group.campaigns.length} draft{group.campaigns.length === 1 ? '' : 's'}</div>
         </div>
@@ -618,6 +641,7 @@ function ZipQueueRail({ groups, selectedZip, onSelectZip }) {
           const blocked = group.zipStatus === 'needs_review_stale_anchor'
           const needsCreative = group.zipStatus === 'needs_creative_review' || group.creativeStatus === 'creative_missing'
           const attention = blocked ? 'Blocked' : needsCreative ? 'Needs creative' : ''
+          const freshnessGate = group.campaigns.map(campaign => campaignFreshnessGate(campaign)).find(Boolean)
           return (
             <button key={group.zip} type="button" onClick={() => onSelectZip(group.zip)} style={{ width: '100%', textAlign: 'left', border: `1px solid ${active ? '#00e676' : blocked ? '#ff4444' : '#1a3a2a'}`, borderRadius: '6px', background: active ? '#0a2a1a' : '#021a0e', color: '#e0ffe0', padding: '10px', cursor: 'pointer', fontFamily: SANS_FONT }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
@@ -628,6 +652,11 @@ function ZipQueueRail({ groups, selectedZip, onSelectZip }) {
               <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
                 {statusPillFor(group.zipStatus, { compact: true })}
                 {statusPillFor(group.creativeStatus, { compact: true })}
+                {freshnessGate && (
+                  <span title={freshnessTooltip(freshnessGate)} style={{ ...pillStyle(freshnessTone(freshnessGate)), fontSize: '9px' }}>
+                    {freshnessLabel(freshnessGate)}
+                  </span>
+                )}
                 {attention && <span style={pillStyle(blocked ? '#ff4444' : '#ffd54f')}>{attention}</span>}
               </div>
             </button>
