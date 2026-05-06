@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import { MARKETING_API, headers } from '../config'
 
 export default function ResearchBrief() {
@@ -7,8 +7,8 @@ export default function ResearchBrief() {
   const [running, setRunning] = useState(false)
   const [error, setError] = useState(null)
 
-  const fetchBrief = async () => {
-    setLoading(true)
+  const fetchBrief = useCallback(async ({ setLoadingState = true } = {}) => {
+    if (setLoadingState) setLoading(true)
     try {
       const res = await fetch(`${MARKETING_API}/research/brief`, { headers })
       const data = await res.json()
@@ -17,7 +17,7 @@ export default function ResearchBrief() {
       setError(err.message)
     }
     setLoading(false)
-  }
+  }, [])
 
   const runResearch = async () => {
     setRunning(true)
@@ -32,7 +32,21 @@ export default function ResearchBrief() {
     setRunning(false)
   }
 
-  useEffect(() => { fetchBrief() }, [])
+  useEffect(() => {
+    let cancelled = false
+    fetch(`${MARKETING_API}/research/brief`, { headers })
+      .then(res => res.json())
+      .then(data => {
+        if (!cancelled) setBrief(data.status === 'not_ready' ? null : data)
+      })
+      .catch(err => {
+        if (!cancelled) setError(err.message)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
 
   return (
     <div>
