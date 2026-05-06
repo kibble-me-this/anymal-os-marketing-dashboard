@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { HAS_MARKETING_ADMIN_KEY, MARKETING_API, adminHeaders } from '../config'
+import { HAS_MARKETING_ADMIN_KEY, HAS_PUBLIC_FEEDS_ADMIN_KEY, MARKETING_API, PUBLIC_FEEDS_API, adminHeaders, publicFeedsAdminHeaders } from '../config'
 
 const SANS_FONT = "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
 const MONO_FONT = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
-const STATUS_OPTIONS = ['pending', 'approved', 'rejected', 'needs_review']
+const STATUS_OPTIONS = ['pending', 'pending_review', 'approved', 'rejected', 'needs_review']
 const DECISIONS = [
   { id: 'approved', label: 'Approve', tone: '#00e676', filled: true },
   { id: 'rejected', label: 'Reject', tone: '#ff4444' },
@@ -14,6 +14,8 @@ const QUEUE_GROUPS = [
   {
     id: 'claims',
     label: 'Pending Claims',
+    apiBase: MARKETING_API,
+    headers: adminHeaders,
     path: '/admin/barn-claims',
     itemKeys: ['claims', 'barn_claims', 'items'],
     itemKind: 'claim',
@@ -23,6 +25,8 @@ const QUEUE_GROUPS = [
   {
     id: 'updates',
     label: 'Pending Updates',
+    apiBase: MARKETING_API,
+    headers: adminHeaders,
     path: '/admin/barn-updates',
     itemKeys: ['updates', 'barn_updates', 'items'],
     itemKind: 'update',
@@ -32,11 +36,13 @@ const QUEUE_GROUPS = [
   {
     id: 'enrichments',
     label: 'Pending Enrichments',
+    apiBase: PUBLIC_FEEDS_API,
+    headers: publicFeedsAdminHeaders,
+    path: '/admin/barn-enrichments',
     itemKeys: ['enrichments', 'barn_enrichments', 'items'],
     itemKind: 'enrichment',
-    emptyTitle: 'Pending enrichments are not live yet',
-    emptyDetail: 'Phase C will add a live barn enrichment endpoint behind this slot.',
-    disabled: true,
+    emptyTitle: 'No pending enrichments',
+    emptyDetail: 'AI-assisted citation-backed enrichment suggestions matching this status will appear here.',
   },
 ]
 
@@ -82,6 +88,22 @@ function displayJson(value) {
   return JSON.stringify(value)
 }
 
+function editableJson(value) {
+  if (value === null || value === undefined || value === '') return ''
+  if (typeof value === 'string') return value
+  return JSON.stringify(value, null, 2)
+}
+
+function parseEditedValue(raw) {
+  const trimmed = raw.trim()
+  if (!trimmed) return { hasEdit: false, value: undefined }
+  try {
+    return { hasEdit: true, value: JSON.parse(trimmed) }
+  } catch {
+    return { hasEdit: true, value: trimmed }
+  }
+}
+
 function itemId(item) {
   return item.id || item.claim_id || item.update_id || item.enrichment_id || item.doc_id || ''
 }
@@ -120,6 +142,13 @@ function statusTone(value) {
   if (value === 'rejected') return '#ff4444'
   if (value === 'needs_review') return '#ffd54f'
   if (value === 'pending') return '#4da3ff'
+  return '#8abf8a'
+}
+
+function confidenceTone(value) {
+  if (value === 'high') return '#00e676'
+  if (value === 'medium') return '#ffd54f'
+  if (value === 'low') return '#ff9f43'
   return '#8abf8a'
 }
 
@@ -213,9 +242,23 @@ function SubmissionDetails({ item, group }) {
   return (
     <div style={{ display: 'grid', gap: '10px' }}>
       <DetailPair label="Field path" value={item.field_path} mono />
-      <DetailPair label="Proposed value" value={displayJson(item.proposed_value)} />
-      <DetailPair label="Source URL" value={item.source_url} link={item.source_url || null} mono />
-      <DetailPair label="Source excerpt" value={item.source_excerpt} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
+        <DetailPair label="Proposed value" value={displayJson(item.proposed_value ?? item.value)} />
+        <DetailPair label="Confidence" value={item.confidence} />
+        <DetailPair label="Model" value={item.model_version} mono />
+      </div>
+      {(item.sources || []).map((source, index) => (
+        <div key={`${source.url || index}`} style={{ border: '1px solid #1a3a2a', borderRadius: '5px', padding: '10px', display: 'grid', gap: '8px' }}>
+          <DetailPair label={`Source ${index + 1}`} value={source.title || source.url} link={source.url || null} mono />
+          <DetailPair label="Excerpt" value={source.excerpt} />
+        </div>
+      ))}
+      {!item.sources?.length && (
+        <>
+          <DetailPair label="Source URL" value={item.source_url} link={item.source_url || null} mono />
+          <DetailPair label="Source excerpt" value={item.source_excerpt} />
+        </>
+      )}
     </div>
   )
 }
@@ -225,6 +268,8 @@ function ModerationRow({
   group,
   notes,
   onNotesChange,
+  editValue,
+  onEditValueChange,
   onDecide,
   actionLoading,
 }) {
@@ -247,9 +292,26 @@ function ModerationRow({
         <span style={{ border: `1px solid ${statusTone(currentStatus)}`, color: statusTone(currentStatus), borderRadius: '999px', padding: '3px 9px', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: SANS_FONT }}>
           {statusLabel(currentStatus)}
         </span>
+        {group.itemKind === 'enrichment' && (
+          <span style={{ border: `1px solid ${confidenceTone(item.confidence)}`, color: confidenceTone(item.confidence), borderRadius: '999px', padding: '3px 9px', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: SANS_FONT }}>
+            {present(item.confidence)} confidence
+          </span>
+        )}
       </div>
 
       <SubmissionDetails item={item} group={group} />
+
+      {group.itemKind === 'enrichment' && (
+        <label style={{ display: 'grid', gap: '6px', color: '#8abf8a', fontSize: '11px', fontFamily: SANS_FONT }}>
+          Edit proposed value before approval
+          <textarea
+            value={editValue}
+            onChange={event => onEditValueChange(rowKey, event.target.value)}
+            placeholder="Leave unchanged to approve the proposed value. Enter text or JSON to edit-and-approve."
+            style={{ ...fieldStyle(), minHeight: '88px', resize: 'vertical', fontFamily: MONO_FONT }}
+          />
+        </label>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', borderTop: '1px solid #1a3a2a', paddingTop: '12px' }}>
         <DetailPair label="Submission id" value={id} mono />
@@ -306,6 +368,7 @@ export default function AdminModeration() {
   const [cursorHistory, setCursorHistory] = useState([])
   const [lastRefresh, setLastRefresh] = useState(null)
   const [notesByRow, setNotesByRow] = useState({})
+  const [editValuesByRow, setEditValuesByRow] = useState({})
   const [actionLoading, setActionLoading] = useState(null)
   const [actionMessage, setActionMessage] = useState(null)
   const [actionError, setActionError] = useState(null)
@@ -328,11 +391,12 @@ export default function AdminModeration() {
 
     setLoading(true)
     setError(null)
-    const params = new URLSearchParams({ status, limit: '50' })
+    const effectiveStatus = activeGroup.itemKind === 'enrichment' && status === 'pending' ? 'pending_review' : status
+    const params = new URLSearchParams({ status: effectiveStatus, limit: '50' })
     if (cursor) params.set('cursor', cursor)
 
     try {
-      const res = await fetch(`${MARKETING_API}${activeGroup.path}?${params.toString()}`, { headers: adminHeaders })
+      const res = await fetch(`${activeGroup.apiBase}${activeGroup.path}?${params.toString()}`, { headers: activeGroup.headers })
       if (!res.ok) {
         throw new Error(await buildErrorMessage(res, 'Load moderation queue'))
       }
@@ -370,26 +434,36 @@ export default function AdminModeration() {
     setNotesByRow(current => ({ ...current, [rowKey]: value }))
   }
 
+  const updateEditValue = (rowKey, value) => {
+    setEditValuesByRow(current => ({ ...current, [rowKey]: value }))
+  }
+
   const decideItem = async (item, decision, rowKey) => {
     const id = itemId(item)
     if (!id || !activeGroup.path) return
     setActionLoading(rowKey)
     setActionError(null)
     setActionMessage(null)
+    const body = {
+      decision,
+      decision_notes: notesByRow[rowKey] || '',
+    }
+    if (activeGroup.itemKind === 'enrichment' && decision === 'approved') {
+      const parsed = parseEditedValue(editValuesByRow[rowKey] || '')
+      if (parsed.hasEdit) body.edited_value = parsed.value
+    }
     try {
-      const res = await fetch(`${MARKETING_API}${activeGroup.path}/${encodeURIComponent(id)}/decide`, {
+      const res = await fetch(`${activeGroup.apiBase}${activeGroup.path}/${encodeURIComponent(id)}/decide`, {
         method: 'POST',
-        headers: adminHeaders,
-        body: JSON.stringify({
-          decision,
-          decision_notes: notesByRow[rowKey] || '',
-        }),
+        headers: activeGroup.headers,
+        body: JSON.stringify(body),
       })
       if (!res.ok) {
         throw new Error(await buildErrorMessage(res, 'Save moderation decision'))
       }
       setActionMessage(`${statusLabel(decision)} decision saved for ${id}.`)
       setNotesByRow(current => ({ ...current, [rowKey]: '' }))
+      setEditValuesByRow(current => ({ ...current, [rowKey]: '' }))
       await fetchQueue({ cursor: currentCursor, history: cursorHistory })
     } catch (err) {
       const message = err?.message?.includes('Save moderation decision failed')
@@ -454,6 +528,11 @@ export default function AdminModeration() {
       {!HAS_MARKETING_ADMIN_KEY && (
         <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', color: '#ffd54f', padding: '10px', fontSize: '12px' }}>
           Admin moderation requires VITE_MARKETING_API_KEY and VITE_MARKETING_ADMIN_KEY in the dashboard environment.
+        </div>
+      )}
+      {activeGroup.id === 'enrichments' && !HAS_PUBLIC_FEEDS_ADMIN_KEY && (
+        <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', color: '#ffd54f', padding: '10px', fontSize: '12px' }}>
+          Pending Enrichments requires VITE_PUBLIC_FEEDS_API_KEY and VITE_PUBLIC_FEEDS_ADMIN_KEY, or matching fallback admin keys, in the dashboard environment.
         </div>
       )}
 
@@ -523,7 +602,9 @@ export default function AdminModeration() {
                 item={item}
                 group={activeGroup}
                 notes={notesByRow[rowKey] || ''}
+                editValue={editValuesByRow[rowKey] ?? (activeGroup.itemKind === 'enrichment' ? editableJson(item.proposed_value ?? item.value) : '')}
                 onNotesChange={updateNotes}
+                onEditValueChange={updateEditValue}
                 onDecide={decideItem}
                 actionLoading={actionLoading}
               />

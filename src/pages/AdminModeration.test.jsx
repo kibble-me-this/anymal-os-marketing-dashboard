@@ -31,6 +31,29 @@ const update = {
   status: 'pending',
 }
 
+const enrichment = {
+  id: 'enrich_1',
+  enrichment_id: 'enrich_1',
+  barn_id: 'arab-livestock-market-arab-al',
+  barn_slug: 'alabama/arab/arab-livestock-market',
+  barn_name: 'Arab Livestock Market',
+  field_path: 'contact.phone',
+  value: '+12565551212',
+  proposed_value: '+12565551212',
+  confidence: 'high',
+  model_version: 'claude-sonnet-4-20250514:phase-c-v1',
+  sources: [
+    {
+      url: 'https://cattleusa.com/arab-livestock-market',
+      title: 'Arab Livestock Market',
+      excerpt: 'Phone: (256) 555-1212',
+      fetched_at: '2026-05-06T12:00:00Z',
+    },
+  ],
+  extracted_at: '2026-05-06T12:00:00Z',
+  status: 'pending_review',
+}
+
 function jsonResponse(body, status = 200) {
   return {
     ok: status >= 200 && status < 300,
@@ -56,7 +79,7 @@ describe('AdminModeration', () => {
     expect(screen.getByText('casey@example.com')).toBeInTheDocument()
     expect(screen.getByText('I own this sale barn and can verify the listing.')).toBeInTheDocument()
     expect(screen.getAllByText('(not provided)').length).toBeGreaterThan(0)
-    expect(screen.getByRole('link', { name: 'Arab Livestock Market' })).toHaveAttribute(
+    expect(screen.getAllByRole('link', { name: 'Arab Livestock Market' })[0]).toHaveAttribute(
       'href',
       'https://world.anymalos.com/cattle-sale-barn-directory/alabama/arab/arab-livestock-market',
     )
@@ -124,5 +147,59 @@ describe('AdminModeration', () => {
     expect(screen.getByText('+15555550999')).toBeInTheDocument()
     expect(screen.getByText('Phone number changed on the barn website.')).toBeInTheDocument()
     expect(fetchMock.mock.calls[1][0]).toContain('/admin/barn-updates?status=pending&limit=50')
+  })
+
+  it('switches to pending enrichments and renders citation-backed fields', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ claims: [], next_cursor: null }))
+      .mockResolvedValueOnce(jsonResponse({ enrichments: [enrichment], next_cursor: null }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AdminModeration />)
+
+    expect(await screen.findByText('No pending claims')).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Pending Enrichments' }))
+
+    expect(await screen.findByText('contact.phone')).toBeInTheDocument()
+    expect(screen.getAllByText('+12565551212').length).toBeGreaterThan(0)
+    expect(screen.getByText('high confidence')).toBeInTheDocument()
+    expect(screen.getByText('claude-sonnet-4-20250514:phase-c-v1')).toBeInTheDocument()
+    expect(screen.getByText('Phone: (256) 555-1212')).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Arab Livestock Market' })[0]).toHaveAttribute(
+      'href',
+      'https://world.anymalos.com/cattle-sale-barn-directory/alabama/arab/arab-livestock-market',
+    )
+    expect(fetchMock.mock.calls[1][0]).toContain('/admin/barn-enrichments?status=pending_review&limit=50')
+  })
+
+  it('submits edited enrichment values only when operator changes the field', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ claims: [], next_cursor: null }))
+      .mockResolvedValueOnce(jsonResponse({ enrichments: [enrichment], next_cursor: null }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'enrich_1', status: 'edited' }))
+      .mockResolvedValueOnce(jsonResponse({ enrichments: [], next_cursor: null }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AdminModeration />)
+
+    await screen.findByText('No pending claims')
+    await user.click(screen.getByRole('tab', { name: 'Pending Enrichments' }))
+    const editBox = await screen.findByLabelText('Edit proposed value before approval')
+    await user.clear(editBox)
+    await user.type(editBox, '+12565550000')
+    await user.click(screen.getByRole('button', { name: 'Approve' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
+    const [url, options] = fetchMock.mock.calls[2]
+    expect(url).toContain('/admin/barn-enrichments/enrich_1/decide')
+    expect(JSON.parse(options.body)).toEqual({
+      decision: 'approved',
+      decision_notes: '',
+      edited_value: '+12565550000',
+    })
+    expect(options.headers).toHaveProperty('X-API-Key')
+    expect(options.headers).toHaveProperty('X-Admin-Key')
   })
 })
