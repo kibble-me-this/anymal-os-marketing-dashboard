@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import { DASHBOARD_PASSWORD } from './config'
 import CampaignDashboard from './pages/CampaignDashboard'
 import ResearchBrief from './pages/ResearchBrief'
 import PipelineControl from './pages/PipelineControl'
+import AdminModeration from './pages/AdminModeration'
 
 const NAV_STYLE = {
   fontFamily: 'IBM Plex Sans, monospace',
@@ -21,13 +22,11 @@ const NAV_STYLE = {
 const NAV_ACTIVE = { ...NAV_STYLE, background: '#00e676', color: '#021a0e' }
 
 export default function App() {
-  const [authenticated, setAuthenticated] = useState(false)
+  const [authenticated, setAuthenticated] = useState(() => (
+    typeof sessionStorage !== 'undefined' && sessionStorage.getItem('mkt_auth') === 'true'
+  ))
   const [passInput, setPassInput] = useState('')
   const [passError, setPassError] = useState('')
-
-  useEffect(() => {
-    if (sessionStorage.getItem('mkt_auth') === 'true') setAuthenticated(true)
-  }, [])
 
   const handleAuth = () => {
     if (passInput === DASHBOARD_PASSWORD) {
@@ -70,6 +69,7 @@ export default function App() {
             <NavLink to="/" end style={({ isActive }) => isActive ? NAV_ACTIVE : NAV_STYLE}>Campaigns</NavLink>
             <NavLink to="/brief" style={({ isActive }) => isActive ? NAV_ACTIVE : NAV_STYLE}>Today's Brief</NavLink>
             <NavLink to="/pipeline" style={({ isActive }) => isActive ? NAV_ACTIVE : NAV_STYLE}>Pipeline</NavLink>
+            <NavLink to="/admin/moderation" style={({ isActive }) => isActive ? NAV_ACTIVE : NAV_STYLE}>Moderation</NavLink>
           </nav>
         </div>
         <div style={{ padding: '24px' }}>
@@ -77,6 +77,7 @@ export default function App() {
             <Route path="/" element={<CampaignDashboard />} />
             <Route path="/brief" element={<ResearchBrief />} />
             <Route path="/pipeline" element={<PipelineControl />} />
+            <Route path="/admin/moderation" element={<AdminModeration />} />
           </Routes>
         </div>
       </div>

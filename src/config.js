@@ -7,6 +7,7 @@ export const headers = {
   'Content-Type': 'application/json',
 }
 export const adminHeaders = {
+  'X-API-Key': API_KEY,
   'X-Admin-Key': ADMIN_KEY,
   'Content-Type': 'application/json',
 }
