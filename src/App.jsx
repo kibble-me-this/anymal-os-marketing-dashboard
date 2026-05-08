@@ -6,6 +6,7 @@ import ResearchBrief from './pages/ResearchBrief'
 import PipelineControl from './pages/PipelineControl'
 import AdminModeration from './pages/AdminModeration'
 import WorkflowRunCockpit from './pages/WorkflowRunCockpit'
+import PagePublishSurface from './pages/PagePublishSurface'
 
 const NAV_STYLE = {
   fontFamily: 'IBM Plex Sans, monospace',
@@ -78,6 +79,7 @@ export default function App() {
             <Route path="/" element={<CampaignDashboard />} />
             <Route path="/agenda" element={<CampaignDashboard />} />
             <Route path="/workflows/:runId" element={<WorkflowRunCockpit />} />
+            <Route path="/workflows/:runId/page-publish/:campaignId" element={<PagePublishSurface />} />
             <Route path="/brief" element={<ResearchBrief />} />
             <Route path="/pipeline" element={<PipelineControl />} />
             <Route path="/admin/moderation" element={<AdminModeration />} />

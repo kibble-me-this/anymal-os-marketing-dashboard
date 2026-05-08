@@ -90,6 +90,7 @@ export function OrientationLine({ run, task, sourceState }) {
 
 export function CarlosTaskCard({
   task,
+  pagePublishHref,
   notes,
   onNotesChange,
   onPrimary,
@@ -132,6 +133,11 @@ export function CarlosTaskCard({
       </label>
 
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        {task?.step?.step_id === 'approve_page_anchor_in_draft_review' && pagePublishHref && (
+          <Link to={pagePublishHref} style={buttonStyle({ filled: true, tone: '#ff7a45' })}>
+            Open focused publish
+          </Link>
+        )}
         <button type="button" onClick={onPrimary} disabled={disabled} style={buttonStyle({ filled: true, tone: risk.tone, disabled })}>
           {loading ? 'Working...' : task?.primaryLabel || 'Refresh'}
         </button>

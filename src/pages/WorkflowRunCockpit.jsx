@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { HAS_MARKETING_ADMIN_KEY, MARKETING_API, adminHeaders, headers } from '../config'
 import {
   CarlosTaskCard,
@@ -13,6 +13,7 @@ import {
 import {
   buildCarlosTask,
   buildEvidenceRows,
+  facebookPageCampaign,
   LAST_WORKFLOW_STORAGE_KEY,
   normalizeZip,
   sourceFreshnessState,
@@ -78,6 +79,7 @@ async function fetchShareOutcomesForZip(zip) {
 
 export default function WorkflowRunCockpit() {
   const { runId } = useParams()
+  const [searchParams] = useSearchParams()
   const [run, setRun] = useState(null)
   const [campaigns, setCampaigns] = useState([])
   const [shareOutcomes, setShareOutcomes] = useState([])
@@ -127,6 +129,21 @@ export default function WorkflowRunCockpit() {
   const evidenceRows = useMemo(() => buildEvidenceRows({ run, campaigns, shareOutcomes }), [campaigns, run, shareOutcomes])
   const task = useMemo(() => buildCarlosTask(run, evidenceRows, shareOutcomes), [evidenceRows, run, shareOutcomes])
   const sourceState = useMemo(() => sourceFreshnessState({ lastLoadedAt, campaigns, shareOutcomes, run }), [campaigns, lastLoadedAt, run, shareOutcomes])
+  const pagePublishCampaign = useMemo(() => facebookPageCampaign(campaigns, sourceState?.zip || run?.linked_entities?.zip), [campaigns, run, sourceState?.zip])
+  const pagePublishHref = pagePublishCampaign?.campaign_id && run?.run_id
+    ? `/workflows/${encodeURIComponent(run.run_id)}/page-publish/${encodeURIComponent(pagePublishCampaign.campaign_id)}`
+    : ''
+
+  useEffect(() => {
+    const publishStatus = searchParams.get('page_publish')
+    if (publishStatus === 'success') {
+      setSuccess('Page publish evidence returned. Review evidence below, then approve the gate when ready.')
+    } else if (publishStatus === 'changes_requested') {
+      setSuccess('Page publish changes were requested. Workflow state was updated.')
+    } else if (publishStatus === 'blocked') {
+      setSuccess('Page publish was blocked. Workflow state was updated.')
+    }
+  }, [searchParams])
 
   useEffect(() => {
     if (!run?.run_id || run.workflow_type !== 'zip_price_activation') return
@@ -260,6 +277,7 @@ export default function WorkflowRunCockpit() {
           <OrientationLine run={run} task={task} sourceState={sourceState} />
           <CarlosTaskCard
             task={task}
+            pagePublishHref={pagePublishHref}
             notes={notes}
             onNotesChange={setNotes}
             onPrimary={handlePrimary}
