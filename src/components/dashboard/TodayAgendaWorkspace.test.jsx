@@ -500,7 +500,7 @@ describe('TodayAgendaWorkspace launch package review', () => {
               agendaRuns: {},
               campaigns: [],
               onComposeAgenda: async () => {
-                setAgendaState(noNewZipAgenda)
+                setAgendaState(initialAgenda)
                 return noNewZipAgenda
               },
               onReopenAgendaItem: async (item) => {
