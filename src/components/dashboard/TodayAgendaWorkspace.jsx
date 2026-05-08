@@ -240,6 +240,13 @@ function pageAnchorEvidence(campaign) {
   }
 }
 
+function campaignCreativeReady(campaign) {
+  return (
+    campaign?.creative_status === 'creative_current'
+    || Boolean(campaign?.creative_metadata?.image_url || campaign?.creative_metadata?.thumbnail_url || campaign?.creative_asset_id)
+  )
+}
+
 function stepResult(run, stepId) {
   return (run?.steps || []).find(step => step.step_id === stepId)?.result || null
 }
@@ -249,9 +256,23 @@ function gateEvidenceState(run, activeGate, campaigns) {
   const gateId = activeGate?.step_id
   if (gateId === 'review_launch_package') {
     const rows = rowsForZip(campaigns, zip)
+    const pageCampaign = rows.find(campaign => campaign.channel === 'facebook_page')
+    const creativeReady = campaignCreativeReady(pageCampaign)
+    if (!rows.length) {
+      return {
+        blocked: true,
+        message: 'Generated draft assets are not loaded yet. Refresh before approving the package.',
+      }
+    }
+    if (!pageCampaign) {
+      return {
+        blocked: true,
+        message: 'A Facebook Page draft is required before approving the launch package.',
+      }
+    }
     return {
-      blocked: rows.length === 0,
-      message: rows.length === 0 ? 'Generated draft assets are not loaded yet. Refresh before approving the package.' : '',
+      blocked: !creativeReady,
+      message: creativeReady ? '' : 'Generate and attach the Facebook Page creative before approving the launch package.',
     }
   }
   if (gateId === 'approve_page_anchor_in_draft_review') {
@@ -352,7 +373,13 @@ function RunControls({
 
       <ModalCategory title="2. Evidence and handoff status" summary="Proof, browser staging, or draft evidence needed before the gate can move.">
         {activeGate?.step_id === 'review_launch_package' && (
-          <LaunchPackageReview campaigns={launchPackageCampaigns} zip={run?.linked_entities?.zip} />
+          <LaunchPackageReview
+            campaigns={launchPackageCampaigns}
+            zip={run?.linked_entities?.zip}
+            zipLoading={zipLoading}
+            onGenerateCreative={onGenerateCreative}
+            onOpenDraftReview={onOpenDraftReview}
+          />
         )}
 
         {activeGate?.step_id === 'approve_page_anchor_in_draft_review' && (
@@ -421,9 +448,13 @@ function RunControls({
   )
 }
 
-function LaunchPackageReview({ campaigns = [], zip }) {
+function LaunchPackageReview({ campaigns = [], zip, zipLoading = {}, onGenerateCreative, onOpenDraftReview }) {
   const rows = rowsForZip(campaigns, zip)
   const pageDraft = rows.find(campaign => campaign.channel === 'facebook_page')
+  const creativeReady = campaignCreativeReady(pageDraft)
+  const creativeUrl = pageDraft?.creative_metadata?.thumbnail_url || pageDraft?.creative_metadata?.image_url || pageDraft?.published_image_url || ''
+  const loadingPhase = zipLoading?.[String(zip || '').padStart(5, '0')] || ''
+  const creativeLoading = Boolean(loadingPhase)
   return (
     <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', alignItems: 'start' }}>
@@ -436,15 +467,42 @@ function LaunchPackageReview({ campaigns = [], zip }) {
         {pageDraft && <StatusPill tone={statusTone(pageDraft.status)}>{pageDraft.status}</StatusPill>}
       </div>
       <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
-        Approving this package only confirms the generated draft set is ready for lower-layer review. It does not publish the Page post, approve distribution targets, or perform any personal-account action.
+        This gate reviews the complete ZIP launch package: copy plus the Facebook Page creative. It does not publish the Page post, approve distribution targets, or perform any personal-account action.
       </div>
       {!rows.length && (
         <div style={{ color: '#ffd54f', fontSize: '12px', lineHeight: 1.45 }}>
           The backend generated the package, but the dashboard has not loaded the draft records yet. Refresh the dashboard before approving.
         </div>
       )}
+      {pageDraft && !creativeReady && (
+        <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', padding: '10px', display: 'grid', gap: '8px' }}>
+          <div style={{ color: '#ffd54f', fontSize: '12px', fontWeight: 700 }}>Facebook Page creative is missing.</div>
+          <div style={{ color: '#ffe9a6', fontSize: '12px', lineHeight: 1.45 }}>
+            Generate and attach the creative here before approving the launch package. Approval stays blocked until the final creative is part of this review.
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => onGenerateCreative?.(zip)} disabled={creativeLoading || !onGenerateCreative} style={buttonStyle({ filled: true, disabled: creativeLoading || !onGenerateCreative })}>
+              {creativeLoading ? loadingPhase : 'Generate and attach creative'}
+            </button>
+            <button type="button" onClick={() => onOpenDraftReview?.(zip)} style={buttonStyle()}>
+              Open Draft Review
+            </button>
+          </div>
+        </div>
+      )}
+      {pageDraft && creativeReady && (
+        <div style={{ border: '1px solid #00e676', borderRadius: '6px', background: '#052312', padding: '10px', display: 'grid', gap: '8px' }}>
+          <div style={{ color: '#00e676', fontSize: '12px', fontWeight: 700 }}>Facebook Page creative is attached.</div>
+          {creativeUrl && (
+            <a href={creativeUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'block', width: 'min(420px, 100%)' }}>
+              <img src={creativeUrl} alt={`Creative preview for ZIP ${zip}`} style={{ width: '100%', aspectRatio: '600 / 315', objectFit: 'cover', border: '1px solid #1a3a2a', borderRadius: '5px', background: '#021a0e' }} />
+            </a>
+          )}
+        </div>
+      )}
       {rows.map(campaign => {
         const copy = campaign.message || campaign.generated_copy || ''
+        const rowCreativeUrl = campaign.creative_metadata?.thumbnail_url || campaign.creative_metadata?.image_url || ''
         return (
           <article key={campaign.campaign_id} style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '10px', display: 'grid', gap: '7px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -455,6 +513,11 @@ function LaunchPackageReview({ campaigns = [], zip }) {
               </div>
             </div>
             <div style={{ color: '#4a7a5a', fontSize: '10px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>{campaign.campaign_id}</div>
+            {campaign.channel === 'facebook_page' && rowCreativeUrl && (
+              <a href={rowCreativeUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'block', width: 'min(360px, 100%)' }}>
+                <img src={rowCreativeUrl} alt={`Facebook Page creative for ZIP ${zip}`} style={{ width: '100%', aspectRatio: '600 / 315', objectFit: 'cover', border: '1px solid #1a3a2a', borderRadius: '5px', background: '#021a0e' }} />
+              </a>
+            )}
             {copy && (
               <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: '#c8f7c8', background: '#021a0e', border: '1px solid #0d281a', borderRadius: '5px', padding: '9px', fontSize: '11px', lineHeight: 1.45, fontFamily: MONO_FONT }}>
                 {copy}
@@ -471,7 +534,7 @@ function PageAnchorGateReview({ campaigns = [], zip, zipLoading = {}, onGenerate
   const pageCampaign = facebookPageCampaign(campaigns, zip)
   const evidence = pageAnchorEvidence(pageCampaign)
   const copy = pageCampaign?.message || pageCampaign?.generated_copy || ''
-  const creativeReady = pageCampaign?.creative_status === 'creative_current' || Boolean(pageCampaign?.creative_metadata?.image_url || pageCampaign?.creative_asset_id)
+  const creativeReady = campaignCreativeReady(pageCampaign)
   const loadingPhase = zipLoading?.[String(zip || '').padStart(5, '0')] || ''
   const creativeLoading = Boolean(loadingPhase)
   return (
