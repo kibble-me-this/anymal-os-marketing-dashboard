@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { LAST_WORKFLOW_STORAGE_KEY } from './workflowCockpitModel'
 
 const MONO_FONT = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
 const SANS_FONT = "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
@@ -22,6 +24,15 @@ const WORKFLOW_LABELS = {
   city_launch_amplification: 'City amplification',
   native_video_review: 'Native video',
   pending_share_follow_up: 'Share follow-up',
+}
+
+function readLastWorkflowShortcut() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LAST_WORKFLOW_STORAGE_KEY) || 'null')
+    return parsed?.runId ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 function buttonStyle({ tone = '#00e676', filled = false, disabled = false } = {}) {
@@ -85,6 +96,18 @@ function EmptyState({ message }) {
     <div style={{ border: '1px dashed #1a3a2a', borderRadius: '6px', padding: '28px', textAlign: 'center', color: '#4a7a5a', background: '#031808', fontSize: '12px' }}>
       {message}
     </div>
+  )
+}
+
+function ModalCategory({ title, summary, tone = '#1a3a2a', children }) {
+  return (
+    <section style={{ border: `1px solid ${tone}`, borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
+      <div style={{ display: 'grid', gap: '4px' }}>
+        <div style={{ color: tone === '#1a3a2a' ? '#4a7a5a' : tone, fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>{title}</div>
+        {summary && <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.4 }}>{summary}</div>}
+      </div>
+      {children}
+    </section>
   )
 }
 
@@ -305,85 +328,89 @@ function RunControls({
 
   return (
     <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#021a0e', padding: '14px', display: 'grid', gap: '12px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', alignItems: 'start' }}>
-        <div>
-          <div style={{ color: '#4a7a5a', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Active workflow run</div>
-          <h3 style={{ color: '#e0ffe0', fontSize: '16px', margin: '5px 0 0 0', letterSpacing: 0 }}>{run.workflow_title}</h3>
-          <div style={{ color: '#8abf8a', fontSize: '11px', marginTop: '5px', fontFamily: MONO_FONT }}>{run.run_id}</div>
+      <ModalCategory title="1. Current decision" summary="The one thing this modal is asking Carlos to decide right now." tone="#ffd54f">
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', alignItems: 'start' }}>
+          <div>
+            <h3 style={{ color: '#e0ffe0', fontSize: '16px', margin: 0, letterSpacing: 0 }}>{run.workflow_title}</h3>
+            <div style={{ color: '#8abf8a', fontSize: '11px', marginTop: '5px', fontFamily: MONO_FONT }}>{run.run_id}</div>
+          </div>
+          <StatusPill tone={statusTone(run.status)}>{run.status}</StatusPill>
         </div>
-        <StatusPill tone={statusTone(run.status)}>{run.status}</StatusPill>
-      </div>
+        {activeGate && (
+          <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', padding: '12px', color: '#ffd54f', display: 'grid', gap: '6px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 700 }}>{activeGate.title}</div>
+            <div style={{ color: '#ffe9a6', fontSize: '12px', lineHeight: 1.4 }}>{activeGate.message}</div>
+          </div>
+        )}
+      </ModalCategory>
 
-      {activeGate && (
-        <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', padding: '12px', color: '#ffd54f', display: 'grid', gap: '6px' }}>
-          <div style={{ fontSize: '13px', fontWeight: 700 }}>{activeGate.title}</div>
-          <div style={{ color: '#ffe9a6', fontSize: '12px', lineHeight: 1.4 }}>{activeGate.message}</div>
+      <ModalCategory title="2. Evidence and handoff status" summary="Proof, browser staging, or draft evidence needed before the gate can move.">
+        {activeGate?.step_id === 'review_launch_package' && (
+          <LaunchPackageReview campaigns={launchPackageCampaigns} zip={run?.linked_entities?.zip} />
+        )}
+
+        {activeGate?.step_id === 'approve_page_anchor_in_draft_review' && (
+          <PageAnchorGateReview
+            campaigns={launchPackageCampaigns}
+            zip={run?.linked_entities?.zip}
+            zipLoading={zipLoading}
+            onGenerateCreative={onGenerateCreative}
+            onOpenDraftReview={onOpenDraftReview}
+          />
+        )}
+
+        {activeGate?.step_id === 'approve_distribution_targets' && (
+          <DistributionGateReview run={run} />
+        )}
+
+        {(activeGate?.step_id === 'stage_personal_share' || activeGate?.step_id === 'click_post') && (
+          <PersonalShareStageReview
+            run={run}
+            onRequestShareStaging={onRequestShareStaging}
+            shareOutcomeActionLoading={shareOutcomeActionLoading}
+          />
+        )}
+
+        {(activeGate?.step_id === 'stage_growth_browser_session' || activeGate?.step_id === 'approve_join_follow_comment_actions') && (
+          <RelationshipGrowthStageReview
+            run={run}
+            onRequestRelationshipGrowthStaging={onRequestRelationshipGrowthStaging}
+            actionLoading={actionLoading}
+          />
+        )}
+
+        {gateEvidence.blocked && (
+          <div style={{ border: '1px solid #ff4444', borderRadius: '6px', background: '#260707', color: '#ffb3b3', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
+            {gateEvidence.message}
+          </div>
+        )}
+      </ModalCategory>
+
+      <ModalCategory title="3. Operator action" summary="Write an optional note, then choose the gate outcome. Disabled buttons mean evidence is still missing.">
+        <textarea
+          value={notes}
+          onChange={event => setNotes(event.target.value)}
+          placeholder="Operator notes or blocking reason"
+          style={{ width: '100%', minHeight: '64px', boxSizing: 'border-box', background: '#021a0e', color: '#e0ffe0', border: '1px solid #1a3a2a', borderRadius: '5px', padding: '9px', fontSize: '12px', fontFamily: MONO_FONT }}
+        />
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button type="button" onClick={() => onRunNextStep(run.run_id)} disabled={isLoading || run.status !== 'running'} style={buttonStyle({ disabled: isLoading || run.status !== 'running' })}>
+            Run safe next step
+          </button>
+          <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'approved', notes)} disabled={positiveDecisionDisabled} style={buttonStyle({ filled: true, disabled: positiveDecisionDisabled })}>
+            {activeGate?.step_id === 'review_launch_package' ? 'Approve package' : 'Approve gate'}
+          </button>
+          <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'completed', notes)} disabled={positiveDecisionDisabled} style={buttonStyle({ disabled: positiveDecisionDisabled })}>
+            Mark done
+          </button>
+          <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'changes_requested', notes)} disabled={isLoading || !stepId} style={buttonStyle({ tone: '#ffd54f', disabled: isLoading || !stepId })}>
+            Changes
+          </button>
+          <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'blocked', notes)} disabled={isLoading || !stepId} style={buttonStyle({ tone: '#ff4444', disabled: isLoading || !stepId })}>
+            Block
+          </button>
         </div>
-      )}
-
-      {activeGate?.step_id === 'review_launch_package' && (
-        <LaunchPackageReview campaigns={launchPackageCampaigns} zip={run?.linked_entities?.zip} />
-      )}
-
-      {activeGate?.step_id === 'approve_page_anchor_in_draft_review' && (
-        <PageAnchorGateReview
-          campaigns={launchPackageCampaigns}
-          zip={run?.linked_entities?.zip}
-          zipLoading={zipLoading}
-          onGenerateCreative={onGenerateCreative}
-          onOpenDraftReview={onOpenDraftReview}
-        />
-      )}
-
-      {activeGate?.step_id === 'approve_distribution_targets' && (
-        <DistributionGateReview run={run} />
-      )}
-
-      {(activeGate?.step_id === 'stage_personal_share' || activeGate?.step_id === 'click_post') && (
-        <PersonalShareStageReview
-          run={run}
-          onRequestShareStaging={onRequestShareStaging}
-          shareOutcomeActionLoading={shareOutcomeActionLoading}
-        />
-      )}
-
-      {(activeGate?.step_id === 'stage_growth_browser_session' || activeGate?.step_id === 'approve_join_follow_comment_actions') && (
-        <RelationshipGrowthStageReview
-          run={run}
-          onRequestRelationshipGrowthStaging={onRequestRelationshipGrowthStaging}
-          actionLoading={actionLoading}
-        />
-      )}
-
-      {gateEvidence.blocked && (
-        <div style={{ border: '1px solid #ff4444', borderRadius: '6px', background: '#260707', color: '#ffb3b3', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
-          {gateEvidence.message}
-        </div>
-      )}
-
-      <textarea
-        value={notes}
-        onChange={event => setNotes(event.target.value)}
-        placeholder="Operator notes or blocking reason"
-        style={{ width: '100%', minHeight: '64px', boxSizing: 'border-box', background: '#031808', color: '#e0ffe0', border: '1px solid #1a3a2a', borderRadius: '5px', padding: '9px', fontSize: '12px', fontFamily: MONO_FONT }}
-      />
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-        <button type="button" onClick={() => onRunNextStep(run.run_id)} disabled={isLoading || run.status !== 'running'} style={buttonStyle({ disabled: isLoading || run.status !== 'running' })}>
-          Run safe next step
-        </button>
-        <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'approved', notes)} disabled={positiveDecisionDisabled} style={buttonStyle({ filled: true, disabled: positiveDecisionDisabled })}>
-          {activeGate?.step_id === 'review_launch_package' ? 'Approve package' : 'Approve gate'}
-        </button>
-        <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'completed', notes)} disabled={positiveDecisionDisabled} style={buttonStyle({ disabled: positiveDecisionDisabled })}>
-          Mark done
-        </button>
-        <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'changes_requested', notes)} disabled={isLoading || !stepId} style={buttonStyle({ tone: '#ffd54f', disabled: isLoading || !stepId })}>
-          Changes
-        </button>
-        <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'blocked', notes)} disabled={isLoading || !stepId} style={buttonStyle({ tone: '#ff4444', disabled: isLoading || !stepId })}>
-          Block
-        </button>
-      </div>
+      </ModalCategory>
     </section>
   )
 }
@@ -600,12 +627,17 @@ function PersonalShareStageReview({ run, onRequestShareStaging, shareOutcomeActi
           This run is missing the staging result. Return to the safe staging step or ask Codex to repair this workflow run before approving Post.
         </div>
       )}
-      {outcomes.map(outcome => (
-        <article key={outcome.share_outcome_id || outcome.target_index} style={{ border: '1px solid #1a3a2a', borderRadius: '6px', padding: '10px', display: 'grid', gap: '8px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-            <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 700 }}>{outcome.group_name || 'Target group'}</div>
-            <StatusPill tone={statusTone(outcome.status)}>{outcome.status || 'prepared'}</StatusPill>
-          </div>
+      {outcomes.map(outcome => {
+        const isActiveOutcome = SHARE_STAGING_ACTIVE_STATUSES.has(outcome.status) || SHARE_STAGE_READY_STATUSES.has(outcome.status)
+        return (
+          <details key={outcome.share_outcome_id || outcome.target_index} open={isActiveOutcome} style={{ border: `1px solid ${isActiveOutcome ? statusTone(outcome.status) : '#1a3a2a'}`, borderRadius: '6px', padding: '10px', display: 'grid', gap: '8px' }}>
+            <summary style={{ cursor: 'pointer', color: '#e0ffe0', fontSize: '13px', fontWeight: 700 }}>
+              <span>{outcome.group_name || 'Target group'}</span>
+              <span style={{ marginLeft: '8px' }}>
+                <StatusPill tone={statusTone(outcome.status)}>{outcome.status || 'prepared'}</StatusPill>
+              </span>
+            </summary>
+            <div style={{ display: 'grid', gap: '8px', marginTop: '10px' }}>
           <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>share_outcome_id: {outcome.share_outcome_id}</div>
           {outcome.page_anchor_post_url && <a href={outcome.page_anchor_post_url} target="_blank" rel="noopener noreferrer" style={{ color: '#00e676', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>Page anchor: {outcome.page_anchor_post_url}</a>}
           {outcome.group_url && <a href={outcome.group_url} target="_blank" rel="noopener noreferrer" style={{ color: '#00e676', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>Group: {outcome.group_url}</a>}
@@ -631,12 +663,17 @@ function PersonalShareStageReview({ run, onRequestShareStaging, shareOutcomeActi
             </div>
           )}
           {Array.isArray(outcome.instructions) && outcome.instructions.length > 0 && (
-            <ol style={{ margin: 0, paddingLeft: '18px', color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
-              {outcome.instructions.map(instruction => <li key={instruction}>{instruction}</li>)}
-            </ol>
+            <details style={{ border: '1px solid #0d281a', borderRadius: '5px', padding: '8px' }}>
+              <summary style={{ color: '#8abf8a', cursor: 'pointer', fontSize: '12px' }}>Desktop runner instructions</summary>
+              <ol style={{ margin: '8px 0 0 0', paddingLeft: '18px', color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
+                {outcome.instructions.map(instruction => <li key={instruction}>{instruction}</li>)}
+              </ol>
+            </details>
           )}
-        </article>
-      ))}
+            </div>
+          </details>
+        )
+      })}
     </section>
   )
 }
@@ -858,9 +895,36 @@ function ActiveRunSummary({ run, activeGate, onOpen }) {
           <div style={{ color: '#fff4bd', fontSize: '15px', fontWeight: 700, marginTop: '4px' }}>{activeGate?.title || run.current_step_id || 'Workflow waiting'}</div>
           <div style={{ color: '#ffe9a6', fontSize: '12px', lineHeight: 1.4, marginTop: '5px' }}>{activeGate?.message || 'Open the run to inspect the next decision.'}</div>
         </div>
-        <button type="button" onClick={onOpen} style={buttonStyle({ filled: true, tone: '#ffd54f' })}>
-          Review gate
-        </button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <Link to={`/workflows/${run.run_id}`} style={{ ...buttonStyle({ filled: true, tone: '#00e676' }), textDecoration: 'none' }}>
+            Open cockpit
+          </Link>
+          <button type="button" onClick={onOpen} style={buttonStyle({ filled: true, tone: '#ffd54f' })}>
+            Review gate
+          </button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function ResumeWorkflowShortcut({ run }) {
+  if (!run?.runId) return null
+  const stepText = run.stepNumber && run.stepCount
+    ? `Step ${run.stepNumber} of ${run.stepCount}`
+    : 'Step unknown'
+  return (
+    <section style={{ border: '1px solid #4da3ff', borderRadius: '6px', background: '#031421', padding: '12px', display: 'grid', gap: '8px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'grid', gap: '4px' }}>
+          <div style={{ color: '#4da3ff', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Resume current workflow</div>
+          <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 700 }}>
+            ZIP Launch {run.zip || 'unknown'} | {stepText} | {run.stepTitle || run.status || 'Workflow run'}
+          </div>
+        </div>
+        <Link to={`/workflows/${run.runId}`} style={{ ...buttonStyle({ filled: true, tone: '#4da3ff' }), textDecoration: 'none' }}>
+          Resume current workflow
+        </Link>
       </div>
     </section>
   )
@@ -890,6 +954,7 @@ export default function TodayAgendaWorkspace({
   const [activationZip, setActivationZip] = useState('')
   const [passedActivationZips, setPassedActivationZips] = useState([])
   const [runModalOpen, setRunModalOpen] = useState(false)
+  const [lastWorkflowShortcut] = useState(readLastWorkflowShortcut)
   const selectedItem = useMemo(() => (
     items.find(item => item.agenda_item_id === selectedItemId)
     || items.find(item => item.agenda_item_id === agenda?.primary_item_id)
@@ -971,6 +1036,8 @@ export default function TodayAgendaWorkspace({
             </button>
           </div>
         </div>
+
+        <ResumeWorkflowShortcut run={lastWorkflowShortcut} />
 
         <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '10px' }}>
           <button
@@ -1090,6 +1157,11 @@ export default function TodayAgendaWorkspace({
                     <p style={{ color: '#8abf8a', margin: 0, fontSize: '13px', lineHeight: 1.45 }}>{selectedItem.why_today}</p>
                   </div>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {selectedItem.active_run_id && (
+                      <Link to={`/workflows/${selectedItem.active_run_id}`} style={{ ...buttonStyle({ tone: '#00e676' }), textDecoration: 'none' }}>
+                        Open cockpit
+                      </Link>
+                    )}
                     {selectedItem.active_run_id && !activeRun && (
                       <button type="button" onClick={() => onLoadRun(selectedItem.active_run_id)} disabled={actionLoading === `load:${selectedItem.active_run_id}`} style={buttonStyle({ disabled: actionLoading === `load:${selectedItem.active_run_id}` })}>
                         Load run
@@ -1159,10 +1231,12 @@ export default function TodayAgendaWorkspace({
             actionLoading={actionLoading}
             shareOutcomeActionLoading={shareOutcomeActionLoading}
           />
-          <section style={{ display: 'grid', gap: '10px' }}>
-            <div style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700 }}>Execution context</div>
-            <WorkflowStepList steps={activeRun.steps} currentStepId={activeRun.current_step_id} />
-          </section>
+          <details style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px' }}>
+            <summary style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700, cursor: 'pointer' }}>Technical execution context</summary>
+            <div style={{ marginTop: '10px' }}>
+              <WorkflowStepList steps={activeRun.steps} currentStepId={activeRun.current_step_id} />
+            </div>
+          </details>
         </Modal>
       )}
     </div>
