@@ -1080,6 +1080,7 @@ export default function TodayAgendaWorkspace({
   const [passedActivationZips, setPassedActivationZips] = useState([])
   const [zipSearchNotice, setZipSearchNotice] = useState('')
   const [recommendedZipRecoveryId, setRecommendedZipRecoveryId] = useState('')
+  const [recommendedZipRecoveryItem, setRecommendedZipRecoveryItem] = useState(null)
   const [runModalOpen, setRunModalOpen] = useState(false)
   const [lastWorkflowShortcut] = useState(readLastWorkflowShortcut)
   const visibleRunIds = useMemo(() => new Set(items.map(item => item.active_run_id).filter(Boolean)), [items])
@@ -1114,9 +1115,10 @@ export default function TodayAgendaWorkspace({
   const zipRecoveryItems = useMemo(() => sortedZipRecoveryItems(agenda?.hidden_items || [], passedActivationZips), [agenda?.hidden_items, passedActivationZips])
   const recommendedZipRecovery = useMemo(() => (
     zipRecoveryItems.find(item => item.agenda_item_id === recommendedZipRecoveryId)
+    || (recommendedZipRecoveryItem?.agenda_item_id === recommendedZipRecoveryId ? recommendedZipRecoveryItem : null)
     || zipRecoveryItems[0]
     || null
-  ), [recommendedZipRecoveryId, zipRecoveryItems])
+  ), [recommendedZipRecoveryId, recommendedZipRecoveryItem, zipRecoveryItems])
   const existingZipLaunchZips = useMemo(() => uniqueZips(
     items
       .filter(item => item.workflow_type === 'zip_price_activation' && item.status !== 'completed')
@@ -1131,6 +1133,7 @@ export default function TodayAgendaWorkspace({
     const requestedExclusions = uniqueZips([...existingZipLaunchZips, ...excludedZips])
     setZipSearchNotice('')
     setRecommendedZipRecoveryId('')
+    setRecommendedZipRecoveryItem(null)
     const nextAgenda = await onComposeAgenda(true, {
       include_workflow_types: ['zip_price_activation'],
       zip_activation_limit: 1,
@@ -1143,6 +1146,7 @@ export default function TodayAgendaWorkspace({
       const recoveryItem = sortedZipRecoveryItems(nextAgenda?.hidden_items || [], excludedZips)[0]
       if (recoveryItem?.agenda_item_id) {
         setRecommendedZipRecoveryId(recoveryItem.agenda_item_id)
+        setRecommendedZipRecoveryItem(recoveryItem)
         setZipSearchNotice(
           `No brand-new ZIP launch is available. Best parked ZIP recommendation is ${agendaItemZip(recoveryItem)} based on current readiness signals.`,
         )
@@ -1308,6 +1312,7 @@ export default function TodayAgendaWorkspace({
                     const nextAgenda = await onReopenAgendaItem(recommendedZipRecovery)
                     setZipSearchNotice('')
                     setRecommendedZipRecoveryId('')
+                    setRecommendedZipRecoveryItem(null)
                     focusComposedWorkflow(nextAgenda, 'zip_price_activation', [agendaItemZip(recommendedZipRecovery)])
                   }}
                   style={buttonStyle({ filled: true, tone: '#4da3ff', disabled: !hasAdminKey || !onReopenAgendaItem || actionLoading === `reopen:${recommendedZipRecovery.agenda_item_id}` })}
