@@ -99,6 +99,20 @@ export function getNextBestAction(stats) {
     .find(rule => rule.when(stats))
 }
 
+export const HIDDEN_AGENDA_STATUSES = new Set(['blocked', 'completed', 'skipped'])
+
+export function agendaItemVisible(item) {
+  return !HIDDEN_AGENDA_STATUSES.has(String(item?.status || ''))
+}
+
+export function visibleMarketingAgenda(agenda) {
+  if (!agenda) return agenda
+  return {
+    ...agenda,
+    items: (agenda.items || []).filter(agendaItemVisible),
+  }
+}
+
 export function isAnymalPageAnchor(campaign) {
   return (
     campaign.channel === 'facebook_page'
@@ -177,7 +191,7 @@ export function buildOpsStats({
   const shareOutcomesBlocked = Number(shareOutcomeSummary.blocked || shareOutcomes.filter(outcome => (
     String(outcome.status || '').startsWith('blocked_')
   )).length)
-  const agendaItems = marketingAgenda?.items || []
+  const agendaItems = (marketingAgenda?.items || []).filter(agendaItemVisible)
   const agendaRunRows = Object.values(agendaRuns || {})
 
   return {
