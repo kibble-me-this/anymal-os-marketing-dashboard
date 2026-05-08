@@ -44,6 +44,10 @@ function agendaItemZip(item) {
   return normalizeZip(item?.linked_entities?.zip)
 }
 
+function uniqueZips(zips) {
+  return Array.from(new Set((zips || []).map(normalizeZip).filter(Boolean)))
+}
+
 function findComposedWorkflowItem(agenda, workflowType, candidateZips = [], excludedZips = []) {
   const items = agenda?.items || []
   const normalizedCandidates = new Set(candidateZips.map(normalizeZip).filter(Boolean))
@@ -1079,19 +1083,25 @@ export default function TodayAgendaWorkspace({
   const activationZipValid = /^\d{5}$/.test(normalizedActivationZip)
   const activationLoading = actionLoading === 'compose:zip'
   const relationshipLoading = actionLoading === 'compose:relationship'
+  const existingZipLaunchZips = useMemo(() => uniqueZips(
+    items
+      .filter(item => item.workflow_type === 'zip_price_activation' && item.status !== 'completed')
+      .map(agendaItemZip),
+  ), [items])
   const focusComposedWorkflow = (nextAgenda, workflowType, candidateZips = [], excludedZips = []) => {
     const item = findComposedWorkflowItem(nextAgenda, workflowType, candidateZips, excludedZips)
     if (item?.agenda_item_id) setSelectedItemId(item.agenda_item_id)
   }
   const composeNextZip = async (excludedZips = passedActivationZips, operatorNotes = 'Carlos requested the next eligible ZIP activation.') => {
+    const requestedExclusions = uniqueZips([...existingZipLaunchZips, ...excludedZips])
     const nextAgenda = await onComposeAgenda(true, {
       include_workflow_types: ['zip_price_activation'],
       zip_activation_limit: 1,
-      excluded_zips: excludedZips,
+      excluded_zips: requestedExclusions,
       operator_notes: operatorNotes,
       loadingKey: 'compose:zip',
     })
-    focusComposedWorkflow(nextAgenda, 'zip_price_activation', [], excludedZips)
+    focusComposedWorkflow(nextAgenda, 'zip_price_activation', [], requestedExclusions)
     return nextAgenda
   }
   const handlePassZip = (zip) => {

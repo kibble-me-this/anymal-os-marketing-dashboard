@@ -200,10 +200,14 @@ describe('TodayAgendaWorkspace launch package review', () => {
       linked_entities: { zip: '73801' },
     }
     const agenda = {
-      items: [passedZipItem, nextZipItem],
+      items: [passedZipItem],
       primary_item_id: passedZipItem.agenda_item_id,
       summary: { executive_message: 'Approve one workflow' },
       research_summary: { learning_status: 'fresh' },
+    }
+    const nextAgenda = {
+      ...agenda,
+      items: [passedZipItem, nextZipItem],
     }
     const composeMock = vi.fn()
 
@@ -218,8 +222,8 @@ describe('TodayAgendaWorkspace launch package review', () => {
               campaigns: [],
               onComposeAgenda: async (...args) => {
                 composeMock(...args)
-                setAgendaState(agenda)
-                return agenda
+                setAgendaState(nextAgenda)
+                return nextAgenda
               },
             })}
           />
@@ -238,7 +242,77 @@ describe('TodayAgendaWorkspace launch package review', () => {
       expect(screen.getByRole('heading', { name: 'Announce 73801 price intelligence is live' })).toBeInTheDocument()
     })
     expect(composeMock).toHaveBeenLastCalledWith(true, expect.objectContaining({
-      excluded_zips: ['67501'],
+      excluded_zips: ['67501', '73801'],
+      include_workflow_types: ['zip_price_activation'],
+    }))
+  })
+
+  it('excludes existing ZIP launches when finding the next ZIP', async () => {
+    const user = userEvent.setup()
+    const activeZipItem = {
+      ...agendaItem,
+      agenda_item_id: 'agenda_zip_67501',
+      workflow_title: 'Announce 67501 price intelligence is live',
+      active_run_id: 'workflowrun_67501',
+      linked_entities: { zip: '67501' },
+    }
+    const queuedZipItem = {
+      ...agendaItem,
+      agenda_item_id: 'agenda_zip_73801',
+      workflow_title: 'Announce 73801 price intelligence is live',
+      active_run_id: 'workflowrun_73801',
+      linked_entities: { zip: '73801' },
+    }
+    const nextZipItem = {
+      ...agendaItem,
+      agenda_item_id: 'agenda_zip_31901',
+      workflow_title: 'Announce 31901 price intelligence is live',
+      active_run_id: '',
+      linked_entities: { zip: '31901' },
+    }
+    const agenda = {
+      items: [activeZipItem, queuedZipItem],
+      primary_item_id: activeZipItem.agenda_item_id,
+      summary: { executive_message: 'Approve one workflow' },
+      research_summary: { learning_status: 'fresh' },
+    }
+    const nextAgenda = {
+      ...agenda,
+      items: [activeZipItem, queuedZipItem, nextZipItem],
+    }
+    const composeMock = vi.fn()
+
+    function Harness() {
+      const [agendaState, setAgendaState] = useState(agenda)
+      return (
+        <MemoryRouter>
+          <TodayAgendaWorkspace
+            {...defaultProps({
+              agenda: agendaState,
+              agendaRuns: {},
+              campaigns: [],
+              onComposeAgenda: async (...args) => {
+                composeMock(...args)
+                setAgendaState(nextAgenda)
+                return nextAgenda
+              },
+            })}
+          />
+        </MemoryRouter>
+      )
+    }
+
+    render(<Harness />)
+
+    expect(screen.getByRole('heading', { name: 'Announce 67501 price intelligence is live' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Find next ZIP launch/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Announce 31901 price intelligence is live' })).toBeInTheDocument()
+    })
+    expect(composeMock).toHaveBeenCalledWith(true, expect.objectContaining({
+      excluded_zips: ['67501', '73801'],
       include_workflow_types: ['zip_price_activation'],
     }))
   })
