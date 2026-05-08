@@ -183,4 +183,63 @@ describe('TodayAgendaWorkspace launch package review', () => {
       loadingKey: 'compose:zip',
     }))
   })
+
+  it('skips passed ZIP launches when focusing the next composed ZIP', async () => {
+    const user = userEvent.setup()
+    const passedZipItem = {
+      ...agendaItem,
+      agenda_item_id: 'agenda_zip_67501',
+      workflow_title: 'Announce 67501 price intelligence is live',
+      active_run_id: '',
+      linked_entities: { zip: '67501' },
+    }
+    const nextZipItem = {
+      ...agendaItem,
+      agenda_item_id: 'agenda_zip_73801',
+      active_run_id: '',
+      linked_entities: { zip: '73801' },
+    }
+    const agenda = {
+      items: [passedZipItem, nextZipItem],
+      primary_item_id: passedZipItem.agenda_item_id,
+      summary: { executive_message: 'Approve one workflow' },
+      research_summary: { learning_status: 'fresh' },
+    }
+    const composeMock = vi.fn()
+
+    function Harness() {
+      const [agendaState, setAgendaState] = useState(agenda)
+      return (
+        <MemoryRouter>
+          <TodayAgendaWorkspace
+            {...defaultProps({
+              agenda: agendaState,
+              agendaRuns: {},
+              campaigns: [],
+              onComposeAgenda: async (...args) => {
+                composeMock(...args)
+                setAgendaState(agenda)
+                return agenda
+              },
+            })}
+          />
+        </MemoryRouter>
+      )
+    }
+
+    render(<Harness />)
+
+    expect(screen.getByRole('heading', { name: 'Announce 67501 price intelligence is live' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Pass ZIP, show next best' }))
+    await user.click(screen.getByRole('button', { name: /Find next ZIP launch/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Announce 73801 price intelligence is live' })).toBeInTheDocument()
+    })
+    expect(composeMock).toHaveBeenLastCalledWith(true, expect.objectContaining({
+      excluded_zips: ['67501'],
+      include_workflow_types: ['zip_price_activation'],
+    }))
+  })
 })
