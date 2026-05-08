@@ -11,7 +11,7 @@ import DistributionWorkspace from '../components/dashboard/DistributionWorkspace
 import ShareOutcomeTrackerWorkspace from '../components/dashboard/ShareOutcomeTrackerWorkspace'
 import NativeVideoWorkspace from '../components/dashboard/NativeVideoWorkspace'
 import TodayAgendaWorkspace from '../components/dashboard/TodayAgendaWorkspace'
-import { buildOpsStats, isAnymalPageAnchor } from '../components/dashboard/dashboardRules'
+import { buildOpsStats, isAnymalPageAnchor, visibleMarketingAgenda } from '../components/dashboard/dashboardRules'
 
 const REFRESH_INTERVAL = 60
 const CHANNELS = [{ id: 'all', label: 'All Channels' }, { id: 'facebook_page', label: 'Facebook' }, { id: 'anymal_linkedin', label: 'Anymal LinkedIn' }, { id: 'personal_linkedin', label: 'Personal LinkedIn' }, { id: 'anymal_x', label: 'Anymal X' }, { id: 'personal_x', label: 'Personal X' }]
@@ -423,7 +423,7 @@ export default function CampaignDashboard() {
         const res7 = await fetch(`${MARKETING_API}/marketing-agenda/today`, { headers: adminHeaders })
         if (!res7.ok) throw new Error(`${res7.status}`)
         const json7 = await res7.json()
-        setMarketingAgenda(json7)
+        setMarketingAgenda(visibleMarketingAgenda(json7))
       } catch (err) {
         console.error('Failed to fetch marketing agenda:', err)
       } finally {
@@ -1237,7 +1237,7 @@ export default function CampaignDashboard() {
         body: JSON.stringify(requestBody),
       })
       if (!res.ok) throw new Error(await readErrorDetail(res))
-      const agenda = await res.json()
+      const agenda = visibleMarketingAgenda(await res.json())
       setMarketingAgenda(agenda)
       selectWorkspace('agenda')
       const zip = options.candidate_zips?.[0]
@@ -1259,14 +1259,14 @@ export default function CampaignDashboard() {
   const patchMarketingAgendaItemRun = (itemId, runId, status) => {
     setMarketingAgenda(agenda => {
       if (!agenda) return agenda
-      return {
+      return visibleMarketingAgenda({
         ...agenda,
         items: (agenda.items || []).map(item => (
           item.agenda_item_id === itemId
             ? { ...item, active_run_id: runId, status: status || item.status }
             : item
         )),
-      }
+      })
     })
   }
 

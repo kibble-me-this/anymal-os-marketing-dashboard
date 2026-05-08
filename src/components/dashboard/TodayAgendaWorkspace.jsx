@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { LAST_WORKFLOW_STORAGE_KEY } from './workflowCockpitModel'
+import { agendaItemVisible } from './dashboardRules'
 
 const MONO_FONT = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
 const SANS_FONT = "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
@@ -25,7 +26,6 @@ const WORKFLOW_LABELS = {
   native_video_review: 'Native video',
   pending_share_follow_up: 'Share follow-up',
 }
-const HIDDEN_AGENDA_STATUSES = new Set(['blocked', 'completed', 'skipped'])
 
 function readLastWorkflowShortcut() {
   try {
@@ -47,10 +47,6 @@ function agendaItemZip(item) {
 
 function uniqueZips(zips) {
   return Array.from(new Set((zips || []).map(normalizeZip).filter(Boolean)))
-}
-
-function agendaItemVisible(item) {
-  return !HIDDEN_AGENDA_STATUSES.has(String(item?.status || ''))
 }
 
 function findComposedWorkflowItem(agenda, workflowType, candidateZips = [], excludedZips = []) {
@@ -1064,6 +1060,10 @@ export default function TodayAgendaWorkspace({
   const [zipSearchNotice, setZipSearchNotice] = useState('')
   const [runModalOpen, setRunModalOpen] = useState(false)
   const [lastWorkflowShortcut] = useState(readLastWorkflowShortcut)
+  const visibleRunIds = useMemo(() => new Set(items.map(item => item.active_run_id).filter(Boolean)), [items])
+  const visibleLastWorkflowShortcut = lastWorkflowShortcut?.runId && visibleRunIds.has(lastWorkflowShortcut.runId)
+    ? lastWorkflowShortcut
+    : null
   const selectedItem = useMemo(() => (
     items.find(item => item.agenda_item_id === selectedItemId)
     || items.find(item => item.agenda_item_id === agenda?.primary_item_id)
@@ -1173,7 +1173,7 @@ export default function TodayAgendaWorkspace({
           </div>
         </div>
 
-        <ResumeWorkflowShortcut run={lastWorkflowShortcut} />
+        <ResumeWorkflowShortcut run={visibleLastWorkflowShortcut} />
 
         <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '10px' }}>
           <button

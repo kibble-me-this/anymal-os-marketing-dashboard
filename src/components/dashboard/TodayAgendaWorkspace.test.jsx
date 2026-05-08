@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import TodayAgendaWorkspace from './TodayAgendaWorkspace'
+import { LAST_WORKFLOW_STORAGE_KEY } from './workflowCockpitModel'
 
 const run = {
   run_id: 'workflowrun_73801',
@@ -104,6 +105,10 @@ function renderWorkspace(overrides = {}) {
 }
 
 describe('TodayAgendaWorkspace launch package review', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
   it('blocks package approval and offers inline creative generation when Page creative is missing', async () => {
     const user = userEvent.setup()
     const props = renderWorkspace()
@@ -428,5 +433,20 @@ describe('TodayAgendaWorkspace launch package review', () => {
     expect(await screen.findByRole('heading', { name: 'Review native video for 74501' })).toBeInTheDocument()
     expect(screen.queryByText('Announce 67501 price intelligence is live')).not.toBeInTheDocument()
     expect(screen.getByText(/No eligible ZIP launch was returned/)).toBeInTheDocument()
+  })
+
+  it('does not show a stale resume shortcut when the run is not visible in agenda', () => {
+    localStorage.setItem(LAST_WORKFLOW_STORAGE_KEY, JSON.stringify({
+      runId: 'workflowrun_67501',
+      zip: '67501',
+      stepNumber: 9,
+      stepCount: 11,
+      stepTitle: 'Request browser staging before Post',
+    }))
+
+    renderWorkspace()
+
+    expect(screen.queryByText(/ZIP Launch 67501/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Resume current workflow' })).not.toBeInTheDocument()
   })
 })
