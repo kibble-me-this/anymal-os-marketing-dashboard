@@ -70,6 +70,26 @@ function findComposedWorkflowItem(agenda, workflowType, candidateZips = [], excl
   )
 }
 
+function zipRecoveryScore(item) {
+  const linked = item?.linked_entities || {}
+  return Number(linked.activation_score || item?.priority_score || 0)
+}
+
+function sortedZipRecoveryItems(items = [], excludedZips = []) {
+  const excluded = new Set(uniqueZips(excludedZips))
+  return (items || [])
+    .filter(item => (
+      item.workflow_type === 'zip_price_activation'
+      && item.status === 'blocked'
+      && !excluded.has(agendaItemZip(item))
+    ))
+    .sort((a, b) => {
+      const scoreDiff = zipRecoveryScore(b) - zipRecoveryScore(a)
+      if (scoreDiff) return scoreDiff
+      return Number(a.linked_entities?.anchor_age_days || 999) - Number(b.linked_entities?.anchor_age_days || 999)
+    })
+}
+
 function buttonStyle({ tone = '#00e676', filled = false, disabled = false } = {}) {
   return {
     padding: '9px 12px',
@@ -1041,6 +1061,7 @@ export default function TodayAgendaWorkspace({
   campaigns,
   hasAdminKey,
   onComposeAgenda,
+  onReopenAgendaItem,
   onApproveItem,
   onLoadRun,
   onOpenDraftReview,
@@ -1058,6 +1079,7 @@ export default function TodayAgendaWorkspace({
   const [activationZip, setActivationZip] = useState('')
   const [passedActivationZips, setPassedActivationZips] = useState([])
   const [zipSearchNotice, setZipSearchNotice] = useState('')
+  const [recommendedZipRecoveryId, setRecommendedZipRecoveryId] = useState('')
   const [runModalOpen, setRunModalOpen] = useState(false)
   const [lastWorkflowShortcut] = useState(readLastWorkflowShortcut)
   const visibleRunIds = useMemo(() => new Set(items.map(item => item.active_run_id).filter(Boolean)), [items])
@@ -1089,6 +1111,12 @@ export default function TodayAgendaWorkspace({
   const activationZipValid = /^\d{5}$/.test(normalizedActivationZip)
   const activationLoading = actionLoading === 'compose:zip'
   const relationshipLoading = actionLoading === 'compose:relationship'
+  const zipRecoveryItems = useMemo(() => sortedZipRecoveryItems(agenda?.hidden_items || [], passedActivationZips), [agenda?.hidden_items, passedActivationZips])
+  const recommendedZipRecovery = useMemo(() => (
+    zipRecoveryItems.find(item => item.agenda_item_id === recommendedZipRecoveryId)
+    || zipRecoveryItems[0]
+    || null
+  ), [recommendedZipRecoveryId, zipRecoveryItems])
   const existingZipLaunchZips = useMemo(() => uniqueZips(
     items
       .filter(item => item.workflow_type === 'zip_price_activation' && item.status !== 'completed')
@@ -1102,6 +1130,7 @@ export default function TodayAgendaWorkspace({
   const composeNextZip = async (excludedZips = passedActivationZips, operatorNotes = 'Carlos requested the next eligible ZIP activation.') => {
     const requestedExclusions = uniqueZips([...existingZipLaunchZips, ...excludedZips])
     setZipSearchNotice('')
+    setRecommendedZipRecoveryId('')
     const nextAgenda = await onComposeAgenda(true, {
       include_workflow_types: ['zip_price_activation'],
       zip_activation_limit: 1,
@@ -1111,6 +1140,14 @@ export default function TodayAgendaWorkspace({
     })
     const focusedItem = focusComposedWorkflow(nextAgenda, 'zip_price_activation', [], requestedExclusions)
     if (!focusedItem) {
+      const recoveryItem = sortedZipRecoveryItems(nextAgenda?.hidden_items || [], excludedZips)[0]
+      if (recoveryItem?.agenda_item_id) {
+        setRecommendedZipRecoveryId(recoveryItem.agenda_item_id)
+        setZipSearchNotice(
+          `No brand-new ZIP launch is available. Best parked ZIP recommendation is ${agendaItemZip(recoveryItem)} based on current readiness signals.`,
+        )
+        return nextAgenda
+      }
       setZipSearchNotice(
         requestedExclusions.length
           ? `No new eligible ZIP launch found after excluding ${requestedExclusions.join(', ')}. Type a ZIP to force a specific market or clear parked ZIP launch runs first.`
@@ -1250,6 +1287,47 @@ export default function TodayAgendaWorkspace({
           {zipSearchNotice && (
             <div style={{ border: '1px solid #ffd54f', borderRadius: '5px', color: '#ffd54f', background: '#1f1a05', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
               {zipSearchNotice}
+            </div>
+          )}
+          {recommendedZipRecovery && (
+            <div style={{ border: '1px solid #4da3ff', borderRadius: '6px', background: '#031421', padding: '12px', display: 'grid', gap: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'start', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ color: '#4da3ff', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Recommended parked ZIP launch</div>
+                  <div style={{ color: '#e0ffe0', fontSize: '16px', fontWeight: 700, marginTop: '4px' }}>
+                    {agendaItemZip(recommendedZipRecovery)} {recommendedZipRecovery.linked_entities?.city ? `| ${recommendedZipRecovery.linked_entities.city}` : ''}
+                  </div>
+                  <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45, marginTop: '5px' }}>
+                    {recommendedZipRecovery.linked_entities?.recommendation_summary || recommendedZipRecovery.research_summary || 'This ZIP has the strongest parked launch signal.'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={!hasAdminKey || !onReopenAgendaItem || actionLoading === `reopen:${recommendedZipRecovery.agenda_item_id}`}
+                  onClick={async () => {
+                    const nextAgenda = await onReopenAgendaItem(recommendedZipRecovery)
+                    setZipSearchNotice('')
+                    setRecommendedZipRecoveryId('')
+                    focusComposedWorkflow(nextAgenda, 'zip_price_activation', [agendaItemZip(recommendedZipRecovery)])
+                  }}
+                  style={buttonStyle({ filled: true, tone: '#4da3ff', disabled: !hasAdminKey || !onReopenAgendaItem || actionLoading === `reopen:${recommendedZipRecovery.agenda_item_id}` })}
+                >
+                  {actionLoading === `reopen:${recommendedZipRecovery.agenda_item_id}` ? 'Restarting...' : 'Restart this ZIP workflow'}
+                </button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
+                {[
+                  ['score', recommendedZipRecovery.linked_entities?.activation_score],
+                  ['grade', recommendedZipRecovery.linked_entities?.public_page_grade],
+                  ['anchor age', recommendedZipRecovery.linked_entities?.anchor_age_days],
+                  ['nearby barns', recommendedZipRecovery.linked_entities?.nearby_count],
+                ].map(([label, value]) => (
+                  <div key={label} style={{ border: '1px solid #1a3a2a', borderRadius: '5px', padding: '8px', color: '#e0ffe0', fontSize: '12px', fontFamily: MONO_FONT }}>
+                    <div style={{ color: '#4a7a5a', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: SANS_FONT }}>{label}</div>
+                    <div style={{ marginTop: '4px' }}>{value ?? 'unknown'}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           {activationZip && !activationZipValid && (

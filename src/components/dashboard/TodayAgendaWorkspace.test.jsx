@@ -77,6 +77,7 @@ function defaultProps(overrides = {}) {
     campaigns: [pageCampaign],
     hasAdminKey: true,
     onComposeAgenda: vi.fn(),
+    onReopenAgendaItem: vi.fn(),
     onApproveItem: vi.fn(),
     onLoadRun: vi.fn(),
     onOpenDraftReview: vi.fn(),
@@ -433,6 +434,98 @@ describe('TodayAgendaWorkspace launch package review', () => {
     expect(await screen.findByRole('heading', { name: 'Review native video for 74501' })).toBeInTheDocument()
     expect(screen.queryByText('Announce 67501 price intelligence is live')).not.toBeInTheDocument()
     expect(screen.getByText(/No eligible ZIP launch was returned/)).toBeInTheDocument()
+  })
+
+  it('offers to restart the best parked ZIP launch when no new ZIP is available', async () => {
+    const user = userEvent.setup()
+    const nativeVideoItem = {
+      ...agendaItem,
+      agenda_item_id: 'agenda_native_video',
+      workflow_title: 'Review native video for 74501',
+      workflow_type: 'native_video_review',
+      active_run_id: '',
+      linked_entities: { zip: '74501' },
+      expected_steps: [],
+    }
+    const blockedZipItem = {
+      ...agendaItem,
+      agenda_item_id: 'agenda_zip_31901',
+      workflow_title: 'Announce 31901 price intelligence is live',
+      active_run_id: 'workflowrun_31901',
+      linked_entities: {
+        zip: '31901',
+        city: 'Columbus',
+        activation_score: 477.1,
+        public_page_grade: 'weak',
+        anchor_age_days: 2.1,
+        nearby_count: 10,
+        recommendation_summary: 'Best parked candidate by activation score.',
+      },
+      status: 'blocked',
+    }
+    const reopenedZipItem = {
+      ...blockedZipItem,
+      active_run_id: undefined,
+      archived_run_id: 'workflowrun_31901',
+      status: 'ready_for_go',
+    }
+    const initialAgenda = {
+      items: [nativeVideoItem],
+      primary_item_id: nativeVideoItem.agenda_item_id,
+      summary: { executive_message: 'Approve one workflow' },
+      research_summary: { learning_status: 'fresh' },
+    }
+    const noNewZipAgenda = {
+      ...initialAgenda,
+      hidden_items: [blockedZipItem],
+      research_summary: {
+        learning_status: 'fresh',
+        source_counts: { zip_activation_candidates: 0 },
+      },
+    }
+    const reopenedAgenda = {
+      ...initialAgenda,
+      items: [nativeVideoItem, reopenedZipItem],
+      hidden_items: [],
+    }
+    const reopenMock = vi.fn()
+
+    function Harness() {
+      const [agendaState, setAgendaState] = useState(initialAgenda)
+      return (
+        <MemoryRouter>
+          <TodayAgendaWorkspace
+            {...defaultProps({
+              agenda: agendaState,
+              agendaRuns: {},
+              campaigns: [],
+              onComposeAgenda: async () => {
+                setAgendaState(noNewZipAgenda)
+                return noNewZipAgenda
+              },
+              onReopenAgendaItem: async (item) => {
+                reopenMock(item)
+                setAgendaState(reopenedAgenda)
+                return reopenedAgenda
+              },
+            })}
+          />
+        </MemoryRouter>
+      )
+    }
+
+    render(<Harness />)
+
+    await user.click(screen.getByRole('button', { name: /Find next ZIP launch/i }))
+
+    expect(await screen.findByText('Recommended parked ZIP launch')).toBeInTheDocument()
+    expect(screen.getAllByText(/31901/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Best parked candidate by activation score/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Restart this ZIP workflow' }))
+
+    expect(reopenMock).toHaveBeenCalledWith(blockedZipItem)
+    expect(await screen.findByRole('heading', { name: 'Announce 31901 price intelligence is live' })).toBeInTheDocument()
   })
 
   it('does not show a stale resume shortcut when the run is not visible in agenda', () => {
