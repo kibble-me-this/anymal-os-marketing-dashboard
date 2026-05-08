@@ -1256,6 +1256,37 @@ export default function CampaignDashboard() {
     }
   }
 
+  const handleReopenAgendaItem = async (item) => {
+    if (!HAS_MARKETING_ADMIN_KEY) {
+      setActionError('Marketing agenda restart requires VITE_MARKETING_ADMIN_KEY.')
+      return
+    }
+    setAgendaActionLoading(`reopen:${item.agenda_item_id}`)
+    setActionError(null)
+    try {
+      const res = await fetch(`${MARKETING_API}/marketing-agenda/items/${item.agenda_item_id}/reopen`, {
+        method: 'POST',
+        headers: adminHeaders,
+        body: JSON.stringify({
+          agenda_id: marketingAgenda?.agenda_id,
+          reopened_by: 'carlos',
+          operator_notes: `Carlos restarted parked ZIP launch ${item.linked_entities?.zip || ''} from the recommendation lane.`,
+        }),
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
+      const agenda = visibleMarketingAgenda(await res.json())
+      setMarketingAgenda(agenda)
+      setActionSuccess(`ZIP launch restarted: ${item.linked_entities?.zip || item.workflow_title}`)
+      setTimeout(() => setActionSuccess(null), 4000)
+      return agenda
+    } catch (err) {
+      setActionError(`ZIP launch restart failed: ${err.message}`)
+      throw err
+    } finally {
+      setAgendaActionLoading(null)
+    }
+  }
+
   const patchMarketingAgendaItemRun = (itemId, runId, status) => {
     setMarketingAgenda(agenda => {
       if (!agenda) return agenda
@@ -1440,6 +1471,7 @@ export default function CampaignDashboard() {
           campaigns={allCampaigns}
           hasAdminKey={HAS_MARKETING_ADMIN_KEY}
           onComposeAgenda={handleComposeMarketingAgenda}
+          onReopenAgendaItem={handleReopenAgendaItem}
           onApproveItem={handleApproveAgendaItem}
           onLoadRun={handleLoadAgendaRun}
           onOpenDraftReview={handleOpenDraftReviewForZip}

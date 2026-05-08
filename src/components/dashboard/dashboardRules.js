@@ -107,9 +107,19 @@ export function agendaItemVisible(item) {
 
 export function visibleMarketingAgenda(agenda) {
   if (!agenda) return agenda
+  const hiddenById = new Map()
+  for (const item of agenda.hidden_items || []) {
+    if (item?.agenda_item_id) hiddenById.set(item.agenda_item_id, item)
+  }
+  for (const item of agenda.items || []) {
+    if (!agendaItemVisible(item) && item?.agenda_item_id) hiddenById.set(item.agenda_item_id, item)
+  }
+  const items = (agenda.items || []).filter(agendaItemVisible)
   return {
     ...agenda,
-    items: (agenda.items || []).filter(agendaItemVisible),
+    items,
+    item_count: items.length,
+    hidden_items: Array.from(hiddenById.values()),
   }
 }
 
