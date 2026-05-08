@@ -367,4 +367,66 @@ describe('TodayAgendaWorkspace launch package review', () => {
       include_workflow_types: ['zip_price_activation'],
     }))
   })
+
+  it('does not focus blocked ZIP launches returned by compose', async () => {
+    const user = userEvent.setup()
+    const nativeVideoItem = {
+      ...agendaItem,
+      agenda_item_id: 'agenda_native_video',
+      workflow_title: 'Review native video for 74501',
+      workflow_type: 'native_video_review',
+      active_run_id: '',
+      linked_entities: { zip: '74501' },
+      expected_steps: [],
+    }
+    const blockedZipItem = {
+      ...agendaItem,
+      agenda_item_id: 'agenda_zip_67501',
+      workflow_title: 'Announce 67501 price intelligence is live',
+      active_run_id: 'workflowrun_67501',
+      linked_entities: { zip: '67501' },
+      status: 'blocked',
+    }
+    const initialAgenda = {
+      items: [nativeVideoItem],
+      primary_item_id: nativeVideoItem.agenda_item_id,
+      summary: { executive_message: 'Approve one workflow' },
+      research_summary: { learning_status: 'fresh' },
+    }
+    const nextAgenda = {
+      ...initialAgenda,
+      items: [nativeVideoItem, blockedZipItem],
+      research_summary: {
+        learning_status: 'fresh',
+        source_counts: { zip_activation_candidates: 0 },
+      },
+    }
+
+    function Harness() {
+      const [agendaState, setAgendaState] = useState(initialAgenda)
+      return (
+        <MemoryRouter>
+          <TodayAgendaWorkspace
+            {...defaultProps({
+              agenda: agendaState,
+              agendaRuns: {},
+              campaigns: [],
+              onComposeAgenda: async () => {
+                setAgendaState(nextAgenda)
+                return nextAgenda
+              },
+            })}
+          />
+        </MemoryRouter>
+      )
+    }
+
+    render(<Harness />)
+
+    await user.click(screen.getByRole('button', { name: /Find next ZIP launch/i }))
+
+    expect(await screen.findByRole('heading', { name: 'Review native video for 74501' })).toBeInTheDocument()
+    expect(screen.queryByText('Announce 67501 price intelligence is live')).not.toBeInTheDocument()
+    expect(screen.getByText(/No eligible ZIP launch was returned/)).toBeInTheDocument()
+  })
 })
