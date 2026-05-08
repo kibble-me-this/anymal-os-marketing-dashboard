@@ -230,6 +230,53 @@ export function SourceFreshnessPanel({ sourceState, onRefresh, loading }) {
   )
 }
 
+const STAGED_SHARE_STATUSES = new Set(['staged_for_operator_review', 'submitted_visible_or_feed', 'pending_admin_approval'])
+const ACTIVE_STAGING_STATUSES = new Set(['staging_requested', 'staging_in_progress'])
+
+function displayStepTitle(step) {
+  if (step?.step_id === 'stage_personal_share') return 'Prepare personal share handoff records'
+  if (step?.step_id === 'click_post') return 'Request browser staging, then Carlos reviews Post'
+  return step?.title
+}
+
+function shareStageCounts(step) {
+  const rows = Array.isArray(step?.result?.share_outcomes) ? step.result.share_outcomes : []
+  return {
+    handoffs: Number(step?.result?.handoff_count ?? rows.length),
+    staged: Number(step?.result?.browser_staged_count ?? rows.filter(row => STAGED_SHARE_STATUSES.has(row.status)).length),
+    requested: Number(step?.result?.staging_requested_count ?? rows.filter(row => row.status === 'staging_requested').length),
+    inProgress: Number(step?.result?.staging_in_progress_count ?? rows.filter(row => row.status === 'staging_in_progress').length),
+    active: rows.some(row => ACTIVE_STAGING_STATUSES.has(row.status)),
+  }
+}
+
+function displayStepStatus(step) {
+  if (step?.step_id !== 'stage_personal_share' || step?.status !== 'completed') return step?.status || 'unknown'
+  const counts = shareStageCounts(step)
+  if (counts.staged > 0) return 'browser staged'
+  if (counts.active) return 'staging requested'
+  return 'handoffs ready'
+}
+
+function displayStepStatusTone(step) {
+  if (step?.step_id === 'stage_personal_share' && step?.status === 'completed') {
+    const counts = shareStageCounts(step)
+    if (counts.staged > 0) return '#00e676'
+    if (counts.active) return '#4da3ff'
+    return '#ffd54f'
+  }
+  if (step?.status === 'completed') return '#00e676'
+  if (step?.status === 'pending') return '#8abf8a'
+  return '#ffd54f'
+}
+
+function displayStepDetail(step) {
+  if (step?.step_id !== 'stage_personal_share') return step?.detail
+  const counts = shareStageCounts(step)
+  const summary = `${counts.handoffs} handoff record${counts.handoffs === 1 ? '' : 's'} prepared; ${counts.staged} browser staged; ${counts.requested} staging requested; ${counts.inProgress} staging in progress.`
+  return [step?.detail, summary].filter(Boolean).join(' ')
+}
+
 export function TechnicalDetails({ run }) {
   return (
     <details style={{ ...PANEL, padding: '14px' }}>
@@ -239,11 +286,11 @@ export function TechnicalDetails({ run }) {
           <article key={step.step_id} style={{ display: 'grid', gridTemplateColumns: '32px minmax(0, 1fr) auto', gap: '10px', alignItems: 'start', border: '1px solid #1a3a2a', borderRadius: '5px', padding: '10px', background: '#021a0e' }}>
             <div style={{ width: '24px', height: '24px', borderRadius: '999px', border: '1px solid #8abf8a', color: '#8abf8a', display: 'grid', placeItems: 'center', fontSize: '11px', fontFamily: MONO_FONT }}>{index + 1}</div>
             <div style={{ display: 'grid', gap: '4px' }}>
-              <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 700 }}>{step.title}</div>
+              <div style={{ color: '#e0ffe0', fontSize: '13px', fontWeight: 700 }}>{displayStepTitle(step)}</div>
               <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT }}>{step.step_id} | {step.kind}</div>
-              {step.detail && <div style={{ color: '#4a7a5a', fontSize: '11px', lineHeight: 1.35 }}>{step.detail}</div>}
+              {displayStepDetail(step) && <div style={{ color: '#4a7a5a', fontSize: '11px', lineHeight: 1.35 }}>{displayStepDetail(step)}</div>}
             </div>
-            <StatusPill tone={step.status === 'completed' ? '#00e676' : step.status === 'pending' ? '#8abf8a' : '#ffd54f'}>{step.status || 'unknown'}</StatusPill>
+            <StatusPill tone={displayStepStatusTone(step)}>{displayStepStatus(step)}</StatusPill>
           </article>
         ))}
       </div>

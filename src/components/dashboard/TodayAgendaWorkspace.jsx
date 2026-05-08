@@ -60,6 +60,12 @@ function StatusPill({ children, tone = '#00e676' }) {
   )
 }
 
+function displayGateTitle(gate) {
+  if (gate?.step_id === 'stage_personal_share') return 'Prepare personal share handoff records'
+  if (gate?.step_id === 'click_post') return 'Request browser staging, then Carlos reviews Post'
+  return gate?.title
+}
+
 function Modal({ title, children, onClose }) {
   return (
     <div
@@ -338,7 +344,7 @@ function RunControls({
         </div>
         {activeGate && (
           <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', padding: '12px', color: '#ffd54f', display: 'grid', gap: '6px' }}>
-            <div style={{ fontSize: '13px', fontWeight: 700 }}>{activeGate.title}</div>
+            <div style={{ fontSize: '13px', fontWeight: 700 }}>{displayGateTitle(activeGate)}</div>
             <div style={{ color: '#ffe9a6', fontSize: '12px', lineHeight: 1.4 }}>{activeGate.message}</div>
           </div>
         )}
@@ -892,7 +898,7 @@ function ActiveRunSummary({ run, activeGate, onOpen }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'start', flexWrap: 'wrap' }}>
         <div>
           <div style={{ color: '#ffd54f', fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: SANS_FONT }}>Current gate</div>
-          <div style={{ color: '#fff4bd', fontSize: '15px', fontWeight: 700, marginTop: '4px' }}>{activeGate?.title || run.current_step_id || 'Workflow waiting'}</div>
+          <div style={{ color: '#fff4bd', fontSize: '15px', fontWeight: 700, marginTop: '4px' }}>{displayGateTitle(activeGate) || run.current_step_id || 'Workflow waiting'}</div>
           <div style={{ color: '#ffe9a6', fontSize: '12px', lineHeight: 1.4, marginTop: '5px' }}>{activeGate?.message || 'Open the run to inspect the next decision.'}</div>
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
