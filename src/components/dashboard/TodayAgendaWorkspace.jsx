@@ -25,6 +25,7 @@ const WORKFLOW_LABELS = {
   native_video_review: 'Native video',
   pending_share_follow_up: 'Share follow-up',
 }
+const HIDDEN_AGENDA_STATUSES = new Set(['blocked', 'completed', 'skipped'])
 
 function readLastWorkflowShortcut() {
   try {
@@ -48,8 +49,12 @@ function uniqueZips(zips) {
   return Array.from(new Set((zips || []).map(normalizeZip).filter(Boolean)))
 }
 
+function agendaItemVisible(item) {
+  return !HIDDEN_AGENDA_STATUSES.has(String(item?.status || ''))
+}
+
 function findComposedWorkflowItem(agenda, workflowType, candidateZips = [], excludedZips = []) {
-  const items = agenda?.items || []
+  const items = (agenda?.items || []).filter(agendaItemVisible)
   const normalizedCandidates = new Set(candidateZips.map(normalizeZip).filter(Boolean))
   const normalizedExcluded = new Set(excludedZips.map(normalizeZip).filter(Boolean))
   const eligibleItems = items.filter(item => (
@@ -1052,7 +1057,7 @@ export default function TodayAgendaWorkspace({
   actionLoading,
   shareOutcomeActionLoading,
 }) {
-  const items = useMemo(() => agenda?.items || [], [agenda])
+  const items = useMemo(() => (agenda?.items || []).filter(agendaItemVisible), [agenda])
   const [selectedItemId, setSelectedItemId] = useState('')
   const [activationZip, setActivationZip] = useState('')
   const [passedActivationZips, setPassedActivationZips] = useState([])
