@@ -1243,6 +1243,7 @@ export default function CampaignDashboard() {
       const zip = options.candidate_zips?.[0]
       setActionSuccess(zip ? `ZIP activation workflow composed for ${zip}.` : options.excluded_zips?.length ? 'Next eligible ZIP activation workflow composed.' : forceRefresh ? 'Fresh marketing agenda composed.' : 'Marketing agenda loaded.')
       setTimeout(() => setActionSuccess(null), 4000)
+      return agenda
     } catch (err) {
       setActionError(`Marketing agenda failed: ${err.message}`)
       throw err

@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react'
+import { useState } from 'react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
@@ -62,8 +63,8 @@ const pageCampaign = {
   message: 'Woodward County cattle folks, here is the 73801 price view.',
 }
 
-function renderWorkspace(overrides = {}) {
-  const props = {
+function defaultProps(overrides = {}) {
+  return {
     agenda: {
       items: [agendaItem],
       primary_item_id: agendaItem.agenda_item_id,
@@ -88,6 +89,10 @@ function renderWorkspace(overrides = {}) {
     shareOutcomeActionLoading: '',
     ...overrides,
   }
+}
+
+function renderWorkspace(overrides = {}) {
+  const props = defaultProps(overrides)
 
   render(
     <MemoryRouter>
@@ -111,5 +116,71 @@ describe('TodayAgendaWorkspace launch package review', () => {
     await user.click(screen.getByRole('button', { name: 'Generate and attach creative' }))
 
     expect(props.onGenerateCreative).toHaveBeenCalledWith('73801')
+  })
+
+  it('selects the ZIP launch returned by Find next ZIP instead of leaving the prior workflow selected', async () => {
+    const user = userEvent.setup()
+    const nativeVideoItem = {
+      ...agendaItem,
+      agenda_item_id: 'agenda_native_video',
+      workflow_title: 'Review native video for 74501',
+      workflow_type: 'native_video_review',
+      active_run_id: '',
+      linked_entities: { zip: '74501' },
+      expected_steps: [],
+    }
+    const zipItem = {
+      ...agendaItem,
+      agenda_item_id: 'agenda_zip_73801',
+      active_run_id: '',
+      linked_entities: { zip: '73801' },
+    }
+    const initialAgenda = {
+      items: [nativeVideoItem],
+      primary_item_id: nativeVideoItem.agenda_item_id,
+      summary: { executive_message: 'Approve one workflow' },
+      research_summary: { learning_status: 'fresh' },
+    }
+    const nextAgenda = {
+      ...initialAgenda,
+      items: [nativeVideoItem, zipItem],
+      primary_item_id: nativeVideoItem.agenda_item_id,
+    }
+    const composeMock = vi.fn()
+
+    function Harness() {
+      const [agendaState, setAgendaState] = useState(initialAgenda)
+      return (
+        <MemoryRouter>
+          <TodayAgendaWorkspace
+            {...defaultProps({
+              agenda: agendaState,
+              agendaRuns: {},
+              campaigns: [],
+              onComposeAgenda: async (...args) => {
+                composeMock(...args)
+                setAgendaState(nextAgenda)
+                return nextAgenda
+              },
+            })}
+          />
+        </MemoryRouter>
+      )
+    }
+
+    render(<Harness />)
+
+    expect(screen.getByRole('heading', { name: 'Review native video for 74501' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Find next ZIP launch/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Announce 73801 price intelligence is live' })).toBeInTheDocument()
+    })
+    expect(composeMock).toHaveBeenCalledWith(true, expect.objectContaining({
+      include_workflow_types: ['zip_price_activation'],
+      zip_activation_limit: 1,
+      loadingKey: 'compose:zip',
+    }))
   })
 })

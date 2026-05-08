@@ -35,6 +35,31 @@ function readLastWorkflowShortcut() {
   }
 }
 
+function normalizeZip(zip) {
+  const value = String(zip || '').trim()
+  return /^\d{1,5}$/.test(value) ? value.padStart(5, '0') : ''
+}
+
+function agendaItemZip(item) {
+  return normalizeZip(item?.linked_entities?.zip)
+}
+
+function findComposedWorkflowItem(agenda, workflowType, candidateZips = []) {
+  const items = agenda?.items || []
+  const normalizedCandidates = new Set(candidateZips.map(normalizeZip).filter(Boolean))
+  if (normalizedCandidates.size) {
+    const exact = items.find(item => item.workflow_type === workflowType && normalizedCandidates.has(agendaItemZip(item)))
+    if (exact) return exact
+  }
+  const primary = items.find(item => item.agenda_item_id === agenda?.primary_item_id && item.workflow_type === workflowType)
+  if (primary) return primary
+  return (
+    items.find(item => item.workflow_type === workflowType && item.status !== 'completed')
+    || items.find(item => item.workflow_type === workflowType)
+    || null
+  )
+}
+
 function buttonStyle({ tone = '#00e676', filled = false, disabled = false } = {}) {
   return {
     padding: '9px 12px',
@@ -1049,13 +1074,21 @@ export default function TodayAgendaWorkspace({
   const activationZipValid = /^\d{5}$/.test(normalizedActivationZip)
   const activationLoading = actionLoading === 'compose:zip'
   const relationshipLoading = actionLoading === 'compose:relationship'
-  const composeNextZip = (excludedZips = passedActivationZips, operatorNotes = 'Carlos requested the next eligible ZIP activation.') => onComposeAgenda(true, {
-    include_workflow_types: ['zip_price_activation'],
-    zip_activation_limit: 1,
-    excluded_zips: excludedZips,
-    operator_notes: operatorNotes,
-    loadingKey: 'compose:zip',
-  })
+  const focusComposedWorkflow = (nextAgenda, workflowType, candidateZips = []) => {
+    const item = findComposedWorkflowItem(nextAgenda, workflowType, candidateZips)
+    if (item?.agenda_item_id) setSelectedItemId(item.agenda_item_id)
+  }
+  const composeNextZip = async (excludedZips = passedActivationZips, operatorNotes = 'Carlos requested the next eligible ZIP activation.') => {
+    const nextAgenda = await onComposeAgenda(true, {
+      include_workflow_types: ['zip_price_activation'],
+      zip_activation_limit: 1,
+      excluded_zips: excludedZips,
+      operator_notes: operatorNotes,
+      loadingKey: 'compose:zip',
+    })
+    focusComposedWorkflow(nextAgenda, 'zip_price_activation')
+    return nextAgenda
+  }
   const handlePassZip = (zip) => {
     const normalizedZip = String(zip || '').trim().padStart(5, '0')
     if (!/^\d{5}$/.test(normalizedZip)) return
@@ -1063,11 +1096,15 @@ export default function TodayAgendaWorkspace({
     setPassedActivationZips(nextPassed)
     composeNextZip(nextPassed, `Carlos passed ZIP ${normalizedZip}; show the next best eligible ZIP activation.`)
   }
-  const composeRelationshipGrowth = () => onComposeAgenda(true, {
-    include_workflow_types: ['relationship_growth'],
-    operator_notes: 'Carlos requested the daily relationship growth workflow.',
-    loadingKey: 'compose:relationship',
-  })
+  const composeRelationshipGrowth = async () => {
+    const nextAgenda = await onComposeAgenda(true, {
+      include_workflow_types: ['relationship_growth'],
+      operator_notes: 'Carlos requested the daily relationship growth workflow.',
+      loadingKey: 'compose:relationship',
+    })
+    focusComposedWorkflow(nextAgenda, 'relationship_growth')
+    return nextAgenda
+  }
   const handlePrimaryAction = async () => {
     if (!selectedItem) return
     if (activeRun) {
@@ -1150,13 +1187,16 @@ export default function TodayAgendaWorkspace({
             </div>
             <button
               type="button"
-              onClick={() => onComposeAgenda(true, {
-                include_workflow_types: ['zip_price_activation'],
-                candidate_zips: [normalizedActivationZip],
-                zip_activation_limit: 1,
-                operator_notes: `Carlos requested ZIP activation for ${normalizedActivationZip}.`,
-                loadingKey: 'compose:zip',
-              })}
+              onClick={async () => {
+                const nextAgenda = await onComposeAgenda(true, {
+                  include_workflow_types: ['zip_price_activation'],
+                  candidate_zips: [normalizedActivationZip],
+                  zip_activation_limit: 1,
+                  operator_notes: `Carlos requested ZIP activation for ${normalizedActivationZip}.`,
+                  loadingKey: 'compose:zip',
+                })
+                focusComposedWorkflow(nextAgenda, 'zip_price_activation', [normalizedActivationZip])
+              }}
               disabled={!hasAdminKey || !activationZipValid || activationLoading}
               style={buttonStyle({ filled: true, disabled: !hasAdminKey || !activationZipValid || activationLoading })}
             >
