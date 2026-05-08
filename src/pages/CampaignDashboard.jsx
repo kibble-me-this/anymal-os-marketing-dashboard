@@ -1241,7 +1241,10 @@ export default function CampaignDashboard() {
       setMarketingAgenda(agenda)
       selectWorkspace('agenda')
       const zip = options.candidate_zips?.[0]
-      setActionSuccess(zip ? `ZIP activation workflow composed for ${zip}.` : options.excluded_zips?.length ? 'Next eligible ZIP activation workflow composed.' : forceRefresh ? 'Fresh marketing agenda composed.' : 'Marketing agenda loaded.')
+      const noZipCandidate = options.include_workflow_types?.includes('zip_price_activation')
+        && options.excluded_zips?.length
+        && Number(agenda?.research_summary?.source_counts?.zip_activation_candidates || 0) === 0
+      setActionSuccess(noZipCandidate ? 'No new eligible ZIP launch found.' : zip ? `ZIP activation workflow composed for ${zip}.` : options.excluded_zips?.length ? 'Next eligible ZIP activation workflow composed.' : forceRefresh ? 'Fresh marketing agenda composed.' : 'Marketing agenda loaded.')
       setTimeout(() => setActionSuccess(null), 4000)
       return agenda
     } catch (err) {

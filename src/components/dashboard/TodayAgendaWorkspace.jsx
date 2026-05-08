@@ -1056,6 +1056,7 @@ export default function TodayAgendaWorkspace({
   const [selectedItemId, setSelectedItemId] = useState('')
   const [activationZip, setActivationZip] = useState('')
   const [passedActivationZips, setPassedActivationZips] = useState([])
+  const [zipSearchNotice, setZipSearchNotice] = useState('')
   const [runModalOpen, setRunModalOpen] = useState(false)
   const [lastWorkflowShortcut] = useState(readLastWorkflowShortcut)
   const selectedItem = useMemo(() => (
@@ -1091,9 +1092,11 @@ export default function TodayAgendaWorkspace({
   const focusComposedWorkflow = (nextAgenda, workflowType, candidateZips = [], excludedZips = []) => {
     const item = findComposedWorkflowItem(nextAgenda, workflowType, candidateZips, excludedZips)
     if (item?.agenda_item_id) setSelectedItemId(item.agenda_item_id)
+    return item
   }
   const composeNextZip = async (excludedZips = passedActivationZips, operatorNotes = 'Carlos requested the next eligible ZIP activation.') => {
     const requestedExclusions = uniqueZips([...existingZipLaunchZips, ...excludedZips])
+    setZipSearchNotice('')
     const nextAgenda = await onComposeAgenda(true, {
       include_workflow_types: ['zip_price_activation'],
       zip_activation_limit: 1,
@@ -1101,7 +1104,14 @@ export default function TodayAgendaWorkspace({
       operator_notes: operatorNotes,
       loadingKey: 'compose:zip',
     })
-    focusComposedWorkflow(nextAgenda, 'zip_price_activation', [], requestedExclusions)
+    const focusedItem = focusComposedWorkflow(nextAgenda, 'zip_price_activation', [], requestedExclusions)
+    if (!focusedItem) {
+      setZipSearchNotice(
+        requestedExclusions.length
+          ? `No new eligible ZIP launch found after excluding ${requestedExclusions.join(', ')}. Type a ZIP to force a specific market or clear parked ZIP launch runs first.`
+          : 'No eligible ZIP launch was returned. Type a ZIP to force a specific market.',
+      )
+    }
     return nextAgenda
   }
   const handlePassZip = (zip) => {
@@ -1210,6 +1220,7 @@ export default function TodayAgendaWorkspace({
                   operator_notes: `Carlos requested ZIP activation for ${normalizedActivationZip}.`,
                   loadingKey: 'compose:zip',
                 })
+                setZipSearchNotice('')
                 focusComposedWorkflow(nextAgenda, 'zip_price_activation', [normalizedActivationZip])
               }}
               disabled={!hasAdminKey || !activationZipValid || activationLoading}
@@ -1229,6 +1240,11 @@ export default function TodayAgendaWorkspace({
           {passedActivationZips.length > 0 && (
             <div style={{ color: '#8abf8a', fontSize: '11px' }}>
               Passed this session: {passedActivationZips.join(', ')}
+            </div>
+          )}
+          {zipSearchNotice && (
+            <div style={{ border: '1px solid #ffd54f', borderRadius: '5px', color: '#ffd54f', background: '#1f1a05', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
+              {zipSearchNotice}
             </div>
           )}
           {activationZip && !activationZipValid && (
