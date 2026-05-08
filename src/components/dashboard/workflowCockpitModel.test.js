@@ -91,6 +91,8 @@ describe('workflow cockpit model', () => {
     const initialTask = buildCarlosTask(baseRun, initialRows, [])
 
     expect(initialTask.actionType).toBe('request_staging')
+    expect(initialTask.title).toBe('Request browser staging before Post')
+    expect(initialTask.risk).toBe('staging')
     expect(initialTask.shareOutcomeId).toBe('share_1')
     expect(initialTask.stepNumber).toBe(2)
     expect(initialTask.stepCount).toBe(3)
@@ -100,6 +102,8 @@ describe('workflow cockpit model', () => {
     const stagedTask = buildCarlosTask(baseRun, stagedRows, stagedShareOutcomes)
 
     expect(stagedTask.actionType).toBe('decision')
+    expect(stagedTask.title).toBe('Carlos reviews staged composer and clicks Post')
+    expect(stagedTask.risk).toBe('live_external')
     expect(stagedTask.disabledReason).toBe('')
     expect(nextClickCopy(stagedTask).willNot).toContain('Click Post for Carlos.')
   })
@@ -116,6 +120,8 @@ describe('workflow cockpit model', () => {
     expect(rows.find(row => row.id === 'personal_share.staged').state).toBe('no')
     expect(rows.find(row => row.id === 'personal_share.staged').detail).toContain('1 staging requested')
     expect(task.actionType).toBe('refresh')
+    expect(task.title).toBe('Waiting for browser staging runner')
+    expect(task.risk).toBe('staging')
     expect(task.primaryLabel).toBe('Refresh staging status')
     expect(task.handoffSummary).toContain('Wait for the desktop runner')
     expect(nextClickCopy(task).willNot).toContain('Request another share handoff.')

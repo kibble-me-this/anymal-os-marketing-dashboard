@@ -139,6 +139,7 @@ export function buildEvidenceRows({ run, campaigns = [], shareOutcomes = [] }) {
   const anchor = pageAnchorEvidence(run, campaigns)
   const share = mergeShareOutcomes(run, shareOutcomes)
   const hasShareRows = share.rows.length > 0
+  const handoffCount = share.rows.length
   const stagedCount = share.rows.filter(outcome => STAGED_SHARE_STATUSES.has(outcome.status)).length
   const requestedCount = share.rows.filter(outcome => outcome.status === 'staging_requested').length
   const inProgressCount = share.rows.filter(outcome => outcome.status === 'staging_in_progress').length
@@ -180,8 +181,10 @@ export function buildEvidenceRows({ run, campaigns = [], shareOutcomes = [] }) {
       id: 'personal_share.staged',
       label: 'Personal share staged',
       state: yesNoUnknown({ known: hasShareRows, yes: staged }),
-      value: hasShareRows ? `${stagedCount} staged` : 'Unknown',
-      source: hasShareRows ? 'stage_personal_share result plus share_outcomes ledger' : 'not exposed yet',
+      value: hasShareRows
+        ? `${stagedCount} browser staged, ${handoffCount} prepared handoff${handoffCount === 1 ? '' : 's'}`
+        : 'Unknown',
+      source: hasShareRows ? 'prepared handoffs plus share_outcomes ledger' : 'not exposed yet',
       detail: [
         requestedCount ? `${requestedCount} staging requested` : '',
         inProgressCount ? `${inProgressCount} staging in progress` : '',
@@ -261,6 +264,9 @@ function clickPostTask(run, evidenceRows, shareOutcomes = []) {
   if (!hasStaged && activeStaging) {
     return {
       actionType: 'refresh',
+      title: 'Waiting for browser staging runner',
+      subtitle: 'The workflow is waiting for a browser-capable runner to stage the Facebook composer before Carlos reviews Post.',
+      risk: 'staging',
       shareOutcomeId: activeStaging.share_outcome_id,
       primaryLabel: 'Refresh staging status',
       disabledReason: '',
@@ -270,15 +276,21 @@ function clickPostTask(run, evidenceRows, shareOutcomes = []) {
   if (!hasStaged && requestable) {
     return {
       actionType: 'request_staging',
+      title: 'Request browser staging before Post',
+      subtitle: 'Prepared handoff records exist, but no Facebook composer is staged yet.',
+      risk: 'staging',
       shareOutcomeId: requestable.share_outcome_id,
       handoffTargetName: requestable.group_name || requestable.share_outcome_id,
       primaryLabel: 'Request browser staging',
       disabledReason: '',
-      handoffSummary: `Ready to request browser staging for ${requestable.group_name || requestable.share_outcome_id}.`,
+      handoffSummary: `Prepared handoff for ${requestable.group_name || requestable.share_outcome_id}. Request staging before any Post review.`,
     }
   }
   return {
     actionType: 'decision',
+    title: hasStaged ? 'Carlos reviews staged composer and clicks Post' : 'Waiting for prepared share handoff',
+    subtitle: hasStaged ? 'A browser composer is staged for operator review.' : 'A prepared share handoff is required before browser staging can start.',
+    risk: hasStaged ? 'live_external' : 'staging',
     primaryLabel: hasStaged ? 'Approve after Post review' : 'Waiting for staged share',
     disabledReason: hasStaged ? '' : 'A share outcome must be staged before this gate can advance.',
     handoffSummary: hasStaged && stagedShare
@@ -348,12 +360,12 @@ export function buildCarlosTask(run, evidenceRows, shareOutcomes = []) {
   }
 
   return {
-    title: step.title || run.attended_gate?.title || step.step_id,
-    subtitle: step.detail || run.attended_gate?.message || run.workflow_title || '',
+    title: action.title || step.title || run.attended_gate?.title || step.step_id,
+    subtitle: action.subtitle || step.detail || run.attended_gate?.message || run.workflow_title || '',
     step,
     stepNumber: stepNumber(run, step.step_id),
     stepCount: (run.steps || []).length || null,
-    risk: riskLabelForStep(step),
+    risk: action.risk || riskLabelForStep(step),
     ...action,
   }
 }
