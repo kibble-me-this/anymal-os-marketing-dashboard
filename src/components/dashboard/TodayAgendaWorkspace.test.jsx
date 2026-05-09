@@ -87,6 +87,7 @@ function defaultProps(overrides = {}) {
     onRequestShareStaging: vi.fn(),
     onRequestRelationshipGrowthStaging: vi.fn(),
     zipLoading: {},
+    zipErrors: {},
     actionLoading: '',
     shareOutcomeActionLoading: '',
     ...overrides,
@@ -122,6 +123,26 @@ describe('TodayAgendaWorkspace launch package review', () => {
     await user.click(screen.getByRole('button', { name: 'Generate and attach creative' }))
 
     expect(props.onGenerateCreative).toHaveBeenCalledWith('73801')
+  })
+
+  it('shows stale ZIP generator rejection inside the workflow modal', async () => {
+    const user = userEvent.setup()
+    renderWorkspace({
+      zipErrors: {
+        73801: {
+          error: 'stale_price_data',
+          fresh_count: 2,
+          total_count: 10,
+          fresh_ratio: 0.2,
+          reject_threshold: 0.3,
+        },
+      },
+    })
+
+    await user.click(screen.getAllByRole('button', { name: 'Review gate' })[0])
+
+    expect(screen.getByRole('alert')).toHaveTextContent('fresh ratio 20% (2/10) is below the 30% launch threshold')
+    expect(screen.getByRole('button', { name: 'Generate and attach creative' })).toBeDisabled()
   })
 
   it('selects the ZIP launch returned by Find next ZIP instead of leaving the prior workflow selected', async () => {

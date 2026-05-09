@@ -1481,6 +1481,7 @@ export default function CampaignDashboard() {
           onRequestShareStaging={handleRequestShareStaging}
           onRequestRelationshipGrowthStaging={handleRequestRelationshipGrowthStaging}
           zipLoading={zipLoading}
+          zipErrors={zipErrors}
           actionLoading={agendaActionLoading}
           shareOutcomeActionLoading={outcomeActionLoading}
         />
