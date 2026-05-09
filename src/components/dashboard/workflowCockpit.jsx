@@ -38,6 +38,12 @@ function stateTone(state) {
   return '#8abf8a'
 }
 
+function runnerTone(state) {
+  if (state === 'green') return '#00e676'
+  if (state === 'red') return '#ff4444'
+  return '#ffd54f'
+}
+
 function StatusPill({ children, tone = '#00e676' }) {
   return (
     <span style={{ border: `1px solid ${tone}`, color: tone, borderRadius: '999px', padding: '3px 8px', fontSize: '10px', fontFamily: SANS_FONT, whiteSpace: 'nowrap' }}>
@@ -75,6 +81,19 @@ export function OrientationLine({ run, task, sourceState }) {
           <div style={{ color: '#4a7a5a', fontSize: '12px', lineHeight: 1.45 }}>
             {run?.status || 'unknown'} | {task?.step?.step_id || 'no current step'} | {task?.step?.kind || 'unknown kind'}
           </div>
+          {task?.targetGroupName && (
+            <div style={{ color: '#e0ffe0', fontSize: '12px', lineHeight: 1.45 }}>
+              Target group: {task.targetGroupName}
+              {task.targetGroupUrl ? (
+                <>
+                  {' | '}
+                  <a href={task.targetGroupUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#00e676', wordBreak: 'break-all' }}>
+                    {task.targetGroupUrl}
+                  </a>
+                </>
+              ) : null}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <StatusPill tone={risk.tone}>{risk.label}</StatusPill>
@@ -96,9 +115,19 @@ export function CarlosTaskCard({
   onPrimary,
   onDecision,
   loading,
+  destinationConfirmed = false,
+  onDestinationConfirmedChange,
 }) {
   const risk = riskCopy(task?.risk)
-  const disabled = Boolean(loading || task?.disabledReason || task?.actionType === 'none')
+  const needsDestinationConfirmation = Boolean(task?.requiresDestinationConfirmation)
+  const disabled = Boolean(
+    loading
+    || task?.disabledReason
+    || task?.actionType === 'none'
+    || (needsDestinationConfirmation && !destinationConfirmed)
+  )
+  const runner = task?.runnerAvailability || null
+  const runnerColor = runnerTone(runner?.state)
   return (
     <section style={{ ...PANEL, padding: '16px', display: 'grid', gap: '14px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'start', flexWrap: 'wrap' }}>
@@ -116,10 +145,45 @@ export function CarlosTaskCard({
         </div>
       )}
 
+      {task?.targetGroupName && (
+        <section style={{ border: '1px solid #ffd54f', borderRadius: '5px', background: '#1f1a05', padding: '10px', display: 'grid', gap: '7px' }}>
+          <div style={{ color: '#ffd54f', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Required share destination</div>
+          <div style={{ color: '#e0ffe0', fontSize: '14px', fontWeight: 700 }}>{task.targetGroupName}</div>
+          {task.targetGroupUrl && (
+            <a href={task.targetGroupUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#00e676', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all' }}>
+              {task.targetGroupUrl}
+            </a>
+          )}
+          <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT }}>posting_identity: {task.postingIdentity || 'carlos_personal'}</div>
+        </section>
+      )}
+
+      {runner && (
+        <div role="status" style={{ border: `1px solid ${runnerColor}`, borderRadius: '5px', color: runnerColor, background: runner.state === 'red' ? '#260707' : '#021a0e', padding: '10px', display: 'flex', gap: '8px', alignItems: 'start', fontSize: '12px', lineHeight: 1.45 }}>
+          <span aria-hidden="true" style={{ width: '9px', height: '9px', borderRadius: '999px', background: runnerColor, display: 'inline-block', marginTop: '4px', flex: '0 0 auto' }} />
+          <span>
+            <strong>{runner.label}</strong>
+            {runner.detail ? `: ${runner.detail}` : ''}
+          </span>
+        </div>
+      )}
+
       {task?.disabledReason && (
         <div role="status" style={{ border: '1px solid #ffd54f', borderRadius: '5px', color: '#ffe58a', background: '#1f1a05', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
           {task.disabledReason}
         </div>
+      )}
+
+      {needsDestinationConfirmation && (
+        <label style={{ display: 'flex', gap: '8px', alignItems: 'start', color: '#ffe58a', background: '#1f1a05', border: '1px solid #ffd54f', borderRadius: '5px', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
+          <input
+            type="checkbox"
+            checked={destinationConfirmed}
+            onChange={event => onDestinationConfirmedChange?.(event.target.checked)}
+            style={{ marginTop: '2px' }}
+          />
+          <span>{task.destinationConfirmLabel}</span>
+        </label>
       )}
 
       <label style={{ display: 'grid', gap: '6px' }}>

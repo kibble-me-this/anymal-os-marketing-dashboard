@@ -77,17 +77,35 @@ async function fetchShareOutcomesForZip(zip) {
   return body.share_outcomes || []
 }
 
+async function fetchBrowserTasksForRun(runId) {
+  if (!runId) return []
+  const params = new URLSearchParams({
+    workflow_run_id: runId,
+    task_type: 'zip_share_staging',
+    limit: '20',
+  })
+  const res = await fetch(`${MARKETING_API}/browser-tasks?${params.toString()}`, {
+    headers: adminHeaders,
+    cache: 'no-store',
+  })
+  if (!res.ok) return []
+  const body = await res.json()
+  return body.browser_tasks || []
+}
+
 export default function WorkflowRunCockpit() {
   const { runId } = useParams()
   const [searchParams] = useSearchParams()
   const [run, setRun] = useState(null)
   const [campaigns, setCampaigns] = useState([])
   const [shareOutcomes, setShareOutcomes] = useState([])
+  const [browserTasks, setBrowserTasks] = useState([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [notes, setNotes] = useState('')
+  const [destinationConfirmation, setDestinationConfirmation] = useState({ key: '', checked: false })
   const [lastLoadedAt, setLastLoadedAt] = useState(null)
 
   const loadWorkflow = useCallback(async () => {
@@ -107,13 +125,15 @@ export default function WorkflowRunCockpit() {
       if (!runRes.ok) throw new Error(await readErrorDetail(runRes))
       const nextRun = await runRes.json()
       const zip = normalizeZip(nextRun?.linked_entities?.zip)
-      const [campaignRows, shareRows] = await Promise.all([
+      const [campaignRows, shareRows, taskRows] = await Promise.all([
         fetchCampaignRowsForZip(zip),
         fetchShareOutcomesForZip(zip),
+        fetchBrowserTasksForRun(nextRun?.run_id || runId),
       ])
       setRun(nextRun)
       setCampaigns(campaignRows)
       setShareOutcomes(shareRows)
+      setBrowserTasks(taskRows)
       setLastLoadedAt(new Date().toISOString())
     } catch (err) {
       setError(`Workflow load failed: ${err.message}`)
@@ -127,8 +147,8 @@ export default function WorkflowRunCockpit() {
   }, [loadWorkflow])
 
   const evidenceRows = useMemo(() => buildEvidenceRows({ run, campaigns, shareOutcomes }), [campaigns, run, shareOutcomes])
-  const task = useMemo(() => buildCarlosTask(run, evidenceRows, shareOutcomes), [evidenceRows, run, shareOutcomes])
-  const sourceState = useMemo(() => sourceFreshnessState({ lastLoadedAt, campaigns, shareOutcomes, run }), [campaigns, lastLoadedAt, run, shareOutcomes])
+  const task = useMemo(() => buildCarlosTask(run, evidenceRows, shareOutcomes, browserTasks), [browserTasks, evidenceRows, run, shareOutcomes])
+  const sourceState = useMemo(() => sourceFreshnessState({ lastLoadedAt, campaigns, shareOutcomes, run, browserTasks }), [browserTasks, campaigns, lastLoadedAt, run, shareOutcomes])
   const pagePublishCampaign = useMemo(() => facebookPageCampaign(campaigns, sourceState?.zip || run?.linked_entities?.zip), [campaigns, run, sourceState?.zip])
   const pagePublishHref = pagePublishCampaign?.campaign_id && run?.run_id
     ? `/workflows/${encodeURIComponent(run.run_id)}/page-publish/${encodeURIComponent(pagePublishCampaign.campaign_id)}`
@@ -162,19 +182,32 @@ export default function WorkflowRunCockpit() {
     }
   }, [run, task])
 
+  const destinationConfirmationKey = `${run?.run_id || ''}:${task?.step?.step_id || ''}:${task?.targetGroupName || ''}:${task?.targetGroupUrl || ''}`
+  const destinationConfirmed = destinationConfirmation.key === destinationConfirmationKey && destinationConfirmation.checked
+
   const recordDecision = async (decision) => {
     if (!run?.run_id || !task?.step?.step_id) return
+    const isPositiveClickPostDecision = task.step.step_id === 'click_post' && ['approved', 'completed'].includes(decision)
+    if (isPositiveClickPostDecision && task.requiresDestinationConfirmation && !destinationConfirmed) {
+      setError('Confirm the staged Facebook composer destination before approving this Post review gate.')
+      return
+    }
     setActionLoading(true)
     setError('')
     setSuccess('')
     try {
+      const destinationNote = isPositiveClickPostDecision && task.targetGroupName
+        ? `Destination confirmed: ${task.targetGroupName}${task.targetGroupUrl ? ` (${task.targetGroupUrl})` : ''}`
+        : ''
+      const operatorNotes = [notes, destinationNote].filter(Boolean).join('\n')
       const res = await fetch(`${MARKETING_API}/marketing-agenda/runs/${encodeURIComponent(run.run_id)}/operator-decision`, {
         method: 'POST',
         headers: adminHeaders,
         body: JSON.stringify({
           step_id: task.step.step_id,
           decision,
-          operator_notes: notes || undefined,
+          operator_notes: operatorNotes || undefined,
+          observed_status: isPositiveClickPostDecision ? 'submitted_visible_or_feed' : undefined,
         }),
       })
       if (!res.ok) throw new Error(await readErrorDetail(res))
@@ -182,6 +215,7 @@ export default function WorkflowRunCockpit() {
       setRun(nextRun)
       setSuccess(`Workflow decision recorded: ${decision}`)
       setNotes('')
+      setDestinationConfirmation({ key: '', checked: false })
       await loadWorkflow()
     } catch (err) {
       setError(`Workflow action failed: ${err.message}`)
@@ -283,6 +317,8 @@ export default function WorkflowRunCockpit() {
             onPrimary={handlePrimary}
             onDecision={recordDecision}
             loading={actionLoading}
+            destinationConfirmed={destinationConfirmed}
+            onDestinationConfirmedChange={checked => setDestinationConfirmation({ key: destinationConfirmationKey, checked })}
           />
           <NextClickPanel task={task} />
           <EvidencePanel rows={evidenceRows} />

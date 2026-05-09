@@ -1381,7 +1381,7 @@ export default function CampaignDashboard() {
     }
   }
 
-  const handleRecordAgendaDecision = async (runId, stepId, decision, operatorNotes) => {
+  const handleRecordAgendaDecision = async (runId, stepId, decision, operatorNotes, extraPayload = {}) => {
     if (!HAS_MARKETING_ADMIN_KEY) {
       setActionError('Marketing agenda decision requires VITE_MARKETING_ADMIN_KEY.')
       return
@@ -1396,6 +1396,7 @@ export default function CampaignDashboard() {
           step_id: stepId,
           decision,
           operator_notes: operatorNotes || undefined,
+          ...extraPayload,
         }),
       })
       if (!res.ok) throw new Error(await readErrorDetail(res))

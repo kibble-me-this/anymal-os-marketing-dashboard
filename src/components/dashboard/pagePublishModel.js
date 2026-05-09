@@ -1,5 +1,5 @@
 import { campaignFreshnessGate, freshnessLabel, freshnessTone, freshnessTooltip, requiresFreshnessAcknowledgment } from './freshness'
-import { currentStep, normalizeZip, stepNumber } from './workflowCockpitModel'
+import { currentStep, normalizeZip, stepNumber, targetShareSummary } from './workflowCockpitModel'
 
 export const CAMPAIGN_LOOKUP_STATUSES = [
   'published',
@@ -157,6 +157,7 @@ export function buildPagePublishArtifact({ run, campaign, campaignId }) {
   const blockers = campaignBlockers({ run, campaign, copy, creative })
   const alreadyPublished = Boolean(evidence.hasPublishedEvidence || campaign?.status === 'published')
   const stepId = step?.step_id || run?.current_step_id || ''
+  const downstreamTarget = targetShareSummary(run, [])
 
   return {
     artifactType: 'facebook_page_publish_decision',
@@ -175,6 +176,12 @@ export function buildPagePublishArtifact({ run, campaign, campaignId }) {
     destination: {
       label: 'Anymal OS Facebook Page',
       channel: 'facebook_page',
+    },
+    downstreamTarget: {
+      known: downstreamTarget.known,
+      label: downstreamTarget.groupName,
+      url: downstreamTarget.groupUrl,
+      postingIdentity: downstreamTarget.postingIdentity,
     },
     copy,
     creative,

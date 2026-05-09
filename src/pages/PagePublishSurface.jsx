@@ -294,6 +294,11 @@ export default function PagePublishSurface() {
             </div>
             <div role="alert" style={{ border: '1px solid #ff7a45', borderRadius: '5px', color: '#ffd1bf', background: '#210f05', padding: '10px', fontSize: '12px', lineHeight: 1.5 }}>
               This screen can publish to the live Facebook Page. Preview first. Carlos owns the final Publish click.
+              {artifact.downstreamTarget?.known && (
+                <div style={{ marginTop: '6px', color: '#ffe58a' }}>
+                  Downstream personal-account share target: {artifact.downstreamTarget.label}. Do not confuse this Page publish with the later group share step.
+                </div>
+              )}
             </div>
           </section>
 
@@ -312,6 +317,18 @@ export default function PagePublishSurface() {
                   <div style={{ color: '#e0ffe0', fontSize: '16px', fontWeight: 700, marginTop: '6px' }}>{artifact.destination.label}</div>
                   <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT, marginTop: '5px' }}>{artifact.channel}</div>
                 </article>
+                {artifact.downstreamTarget?.known && (
+                  <article style={{ border: '1px solid #ffd54f', borderRadius: '5px', padding: '12px', background: '#1f1a05' }}>
+                    <div style={{ color: '#ffd54f', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Later share target</div>
+                    <div style={{ color: '#e0ffe0', fontSize: '15px', fontWeight: 700, marginTop: '6px' }}>{artifact.downstreamTarget.label}</div>
+                    {artifact.downstreamTarget.url && (
+                      <a href={artifact.downstreamTarget.url} target="_blank" rel="noopener noreferrer" style={{ color: '#00e676', fontSize: '11px', fontFamily: MONO_FONT, wordBreak: 'break-all', display: 'block', marginTop: '5px' }}>
+                        {artifact.downstreamTarget.url}
+                      </a>
+                    )}
+                    <div style={{ color: '#8abf8a', fontSize: '11px', fontFamily: MONO_FONT, marginTop: '5px' }}>posting_identity: {artifact.downstreamTarget.postingIdentity}</div>
+                  </article>
+                )}
                 <article style={{ border: `1px solid ${artifact.freshness.tone}`, borderRadius: '5px', padding: '12px', background: '#021a0e' }}>
                   <div style={{ color: '#4a7a5a', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Freshness</div>
                   <div style={{ color: artifact.freshness.tone, fontSize: '16px', fontWeight: 700, marginTop: '6px' }}>{artifact.freshness.label}</div>
