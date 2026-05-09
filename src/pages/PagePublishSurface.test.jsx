@@ -24,6 +24,15 @@ const run = {
   steps: [
     { step_id: 'review_launch_package', title: 'Carlos reviews launch package', kind: 'carlos_final_action', status: 'completed' },
     { step_id: 'approve_page_anchor_in_draft_review', title: 'Carlos approves Page anchor in Draft Review', kind: 'carlos_final_action', status: 'pending' },
+    { step_id: 'stage_personal_share', title: 'Stage personal share', kind: 'browser_stage_only', status: 'pending', result: {
+      share_outcomes: [{
+        share_outcome_id: 'share_1',
+        group_name: 'USA Cattle',
+        group_url: 'https://www.facebook.com/groups/usa-cattle',
+        posting_identity: 'carlos_personal',
+        status: 'approved_for_attended_share',
+      }],
+    } },
   ],
 }
 
@@ -108,6 +117,7 @@ describe('PagePublishSurface', () => {
 
     expect(await screen.findByRole('heading', { name: 'Publish ZIP 31901 Facebook Page post' })).toBeInTheDocument()
     expect(screen.getByText('Anymal OS Facebook Page')).toBeInTheDocument()
+    expect(screen.getAllByText('USA Cattle')[0]).toBeInTheDocument()
     expect(screen.getByText('Columbus and Muscogee County cattle folks: local price view is live.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Preview Facebook Page Post' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Publish Facebook Page Post' })).toBeDisabled()

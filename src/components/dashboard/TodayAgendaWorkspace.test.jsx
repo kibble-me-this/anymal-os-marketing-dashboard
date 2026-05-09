@@ -563,4 +563,74 @@ describe('TodayAgendaWorkspace launch package review', () => {
     expect(screen.queryByText(/ZIP Launch 67501/)).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Resume current workflow' })).not.toBeInTheDocument()
   })
+
+  it('requires destination confirmation before approving the step 9 modal fallback', async () => {
+    const user = userEvent.setup()
+    const step9Run = {
+      ...run,
+      current_step_id: 'click_post',
+      attended_gate: {
+        step_id: 'click_post',
+        title: 'Carlos reviews staged composer and clicks Post',
+        message: 'A browser composer is staged for operator review.',
+      },
+      steps: [
+        ...run.steps,
+        {
+          step_id: 'stage_personal_share',
+          title: 'Stage personal account share',
+          kind: 'browser_stage_only',
+          status: 'completed',
+          result: {
+            share_outcomes: [
+              {
+                share_outcome_id: 'shareoutcome_73801',
+                status: 'staged_for_operator_review',
+                group_name: 'OKLAHOMA BEEF CATTLE GROUP',
+                group_url: 'https://www.facebook.com/groups/okbeef',
+                posting_identity: 'carlos_personal',
+              },
+            ],
+          },
+        },
+        {
+          step_id: 'click_post',
+          title: 'Carlos reviews staged composer and clicks Post',
+          kind: 'carlos_final_action',
+          status: 'pending',
+        },
+      ],
+    }
+    const step9Item = {
+      ...agendaItem,
+      expected_steps: step9Run.steps,
+    }
+    const props = renderWorkspace({
+      agenda: {
+        items: [step9Item],
+        primary_item_id: step9Item.agenda_item_id,
+        summary: { executive_message: 'Approve one workflow' },
+        research_summary: { learning_status: 'fresh' },
+      },
+      agendaRuns: { [step9Run.run_id]: step9Run },
+    })
+
+    await user.click(screen.getAllByRole('button', { name: 'Review gate' })[0])
+
+    const approveButton = screen.getByRole('button', { name: 'Approve gate' })
+    expect(screen.getAllByText(/OKLAHOMA BEEF CATTLE GROUP/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/not my personal feed/)).toBeInTheDocument()
+    expect(approveButton).toBeDisabled()
+
+    await user.click(screen.getByRole('checkbox', { name: /OKLAHOMA BEEF CATTLE GROUP/ }))
+    await user.click(approveButton)
+
+    expect(props.onRecordDecision).toHaveBeenCalledWith(
+      step9Run.run_id,
+      'click_post',
+      'approved',
+      expect.stringContaining('Destination confirmed: OKLAHOMA BEEF CATTLE GROUP'),
+      { observed_status: 'submitted_visible_or_feed' },
+    )
+  })
 })

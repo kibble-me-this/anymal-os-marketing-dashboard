@@ -4,7 +4,9 @@ import {
   buildEvidenceRows,
   nextClickCopy,
   riskLabelForStep,
+  runnerAvailabilityFromBrowserTasks,
   sourceFreshnessState,
+  targetShareSummary,
 } from './workflowCockpitModel'
 
 const baseRun = {
@@ -105,6 +107,8 @@ describe('workflow cockpit model', () => {
     expect(stagedTask.title).toBe('Carlos reviews staged composer and clicks Post')
     expect(stagedTask.risk).toBe('live_external')
     expect(stagedTask.disabledReason).toBe('')
+    expect(stagedTask.requiresDestinationConfirmation).toBe(true)
+    expect(stagedTask.destinationConfirmLabel).toContain('USA Cattle')
     expect(nextClickCopy(stagedTask).willNot).toContain('Click Post for Carlos.')
   })
 
@@ -139,9 +143,51 @@ describe('workflow cockpit model', () => {
       shareOutcomes: [],
     })
 
-    expect(source.browserTasksSource).toBe('not integrated in V1')
+    expect(source.browserTasksSource).toBe('Runner status unknown')
     expect(source.runDiscoverySource).toBe('exact run id required')
     expect(source.historicalAccessSource).toBe('exact run id required')
     expect(source.pageFreshnessLabel).toBe('unknown')
+  })
+
+  it('surfaces target share details and runner availability for step 9', () => {
+    const shareRows = [{
+      share_outcome_id: 'share_1',
+      group_name: 'USA Cattle',
+      group_url: 'https://www.facebook.com/groups/usa-cattle',
+      status: 'staging_requested',
+      posting_identity: 'carlos_personal',
+    }]
+
+    const target = targetShareSummary(baseRun, shareRows)
+    const runner = runnerAvailabilityFromBrowserTasks([{ browser_task_id: 'task_1', status: 'queued' }], shareRows, baseRun)
+
+    expect(target.groupName).toBe('USA Cattle')
+    expect(target.groupUrl).toContain('usa-cattle')
+    expect(runner.state).toBe('yellow')
+    expect(runner.disableRequest).toBe(false)
+  })
+
+  it('does not count wrong-destination outcomes as posted shares', () => {
+    const rows = buildEvidenceRows({
+      run: baseRun,
+      campaigns: [],
+      shareOutcomes: [{
+        share_outcome_id: 'share_1',
+        status: 'posted_to_personal_feed_not_target_group',
+        facebook_share_url: 'https://facebook.com/carlos/posts/1',
+      }],
+    })
+
+    const posted = rows.find(row => row.id === 'personal_share.posted')
+    expect(posted.state).toBe('no')
+    expect(posted.value).toBe('Not observed')
+  })
+
+  it('marks a known failed runner task as red and disables new staging requests', () => {
+    const runner = runnerAvailabilityFromBrowserTasks([{ browser_task_id: 'task_1', status: 'failed', error: 'Chrome profile missing' }], [], baseRun)
+
+    expect(runner.state).toBe('red')
+    expect(runner.disableRequest).toBe(true)
+    expect(runner.detail).toContain('Chrome profile missing')
   })
 })

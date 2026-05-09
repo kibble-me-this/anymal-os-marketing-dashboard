@@ -331,6 +331,18 @@ function stepResult(run, stepId) {
   return (run?.steps || []).find(step => step.step_id === stepId)?.result || null
 }
 
+function targetShareForRun(run) {
+  const stageResult = stepResult(run, 'stage_personal_share')
+  const outcomes = Array.isArray(stageResult?.share_outcomes) ? stageResult.share_outcomes : []
+  return (
+    outcomes.find(outcome => outcome.status === 'staged_for_operator_review')
+    || outcomes.find(outcome => SHARE_STAGING_ACTIVE_STATUSES.has(outcome.status))
+    || outcomes.find(outcome => outcome.status === 'approved_for_attended_share')
+    || outcomes[0]
+    || null
+  )
+}
+
 function gateEvidenceState(run, activeGate, campaigns) {
   const zip = run?.linked_entities?.zip
   const gateId = activeGate?.step_id
@@ -427,15 +439,32 @@ function RunControls({
   shareOutcomeActionLoading,
 }) {
   const [notes, setNotes] = useState('')
+  const [destinationConfirmation, setDestinationConfirmation] = useState({ key: '', checked: false })
   const stepId = activeGate?.step_id || run?.current_step_id || ''
   const isLoading = actionLoading === `run:${run?.run_id}` || actionLoading === `decision:${run?.run_id}`
   const gateEvidence = gateEvidenceState(run, activeGate, launchPackageCampaigns)
-  const positiveDecisionDisabled = isLoading || !stepId || gateEvidence.blocked
+  const targetShare = targetShareForRun(run)
+  const requiresDestinationConfirmation = stepId === 'click_post' && !gateEvidence.blocked && Boolean(targetShare?.group_name)
+  const destinationConfirmationKey = `${run?.run_id || ''}:${stepId}:${targetShare?.share_outcome_id || ''}:${targetShare?.group_name || ''}`
+  const destinationConfirmed = destinationConfirmation.key === destinationConfirmationKey && destinationConfirmation.checked
+  const positiveDecisionDisabled = isLoading || !stepId || gateEvidence.blocked || (requiresDestinationConfirmation && !destinationConfirmed)
   const zipError = zipErrors?.[normalizeZip(run?.linked_entities?.zip)] || null
   const pageCampaign = facebookPageCampaign(launchPackageCampaigns, run?.linked_entities?.zip)
   const pagePublishHref = run?.run_id && pageCampaign?.campaign_id
     ? `/workflows/${encodeURIComponent(run.run_id)}/page-publish/${encodeURIComponent(pageCampaign.campaign_id)}`
     : ''
+
+  const recordDecisionWithContext = (decision) => {
+    const isPositiveClickPostDecision = stepId === 'click_post' && ['approved', 'completed'].includes(decision)
+    const destinationNote = isPositiveClickPostDecision && targetShare?.group_name
+      ? `Destination confirmed: ${targetShare.group_name}${targetShare.group_url ? ` (${targetShare.group_url})` : ''}`
+      : ''
+    const operatorNotes = [notes, destinationNote].filter(Boolean).join('\n')
+    const extraPayload = isPositiveClickPostDecision
+      ? { observed_status: 'submitted_visible_or_feed' }
+      : {}
+    return onRecordDecision(run.run_id, stepId, decision, operatorNotes, extraPayload)
+  }
 
   if (!run) return null
 
@@ -509,6 +538,20 @@ function RunControls({
       </ModalCategory>
 
       <ModalCategory title="3. Operator action" summary="Write an optional note, then choose the gate outcome. Disabled buttons mean evidence is still missing.">
+        {requiresDestinationConfirmation && (
+          <label style={{ display: 'flex', gap: '8px', alignItems: 'start', color: '#ffe58a', background: '#1f1a05', border: '1px solid #ffd54f', borderRadius: '6px', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
+            <input
+              type="checkbox"
+              checked={destinationConfirmed}
+              onChange={event => setDestinationConfirmation({ key: destinationConfirmationKey, checked: event.target.checked })}
+              style={{ marginTop: '2px' }}
+            />
+            <span>
+              I confirmed the Facebook composer destination is {targetShare.group_name}, not my personal feed.
+              {targetShare.group_url ? ` ${targetShare.group_url}` : ''}
+            </span>
+          </label>
+        )}
         <textarea
           value={notes}
           onChange={event => setNotes(event.target.value)}
@@ -519,16 +562,16 @@ function RunControls({
           <button type="button" onClick={() => onRunNextStep(run.run_id)} disabled={isLoading || run.status !== 'running'} style={buttonStyle({ disabled: isLoading || run.status !== 'running' })}>
             Run safe next step
           </button>
-          <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'approved', notes)} disabled={positiveDecisionDisabled} style={buttonStyle({ filled: true, disabled: positiveDecisionDisabled })}>
+          <button type="button" onClick={() => recordDecisionWithContext('approved')} disabled={positiveDecisionDisabled} style={buttonStyle({ filled: true, disabled: positiveDecisionDisabled })}>
             {activeGate?.step_id === 'review_launch_package' ? 'Approve package' : 'Approve gate'}
           </button>
-          <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'completed', notes)} disabled={positiveDecisionDisabled} style={buttonStyle({ disabled: positiveDecisionDisabled })}>
+          <button type="button" onClick={() => recordDecisionWithContext('completed')} disabled={positiveDecisionDisabled} style={buttonStyle({ disabled: positiveDecisionDisabled })}>
             Mark done
           </button>
-          <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'changes_requested', notes)} disabled={isLoading || !stepId} style={buttonStyle({ tone: '#ffd54f', disabled: isLoading || !stepId })}>
+          <button type="button" onClick={() => recordDecisionWithContext('changes_requested')} disabled={isLoading || !stepId} style={buttonStyle({ tone: '#ffd54f', disabled: isLoading || !stepId })}>
             Changes
           </button>
-          <button type="button" onClick={() => onRecordDecision(run.run_id, stepId, 'blocked', notes)} disabled={isLoading || !stepId} style={buttonStyle({ tone: '#ff4444', disabled: isLoading || !stepId })}>
+          <button type="button" onClick={() => recordDecisionWithContext('blocked')} disabled={isLoading || !stepId} style={buttonStyle({ tone: '#ff4444', disabled: isLoading || !stepId })}>
             Block
           </button>
         </div>

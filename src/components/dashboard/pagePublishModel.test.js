@@ -18,6 +18,15 @@ const run = {
   steps: [
     { step_id: 'review_launch_package', title: 'Carlos reviews launch package', kind: 'carlos_final_action', status: 'completed' },
     { step_id: 'approve_page_anchor_in_draft_review', title: 'Carlos approves Page anchor in Draft Review', kind: 'carlos_final_action', status: 'pending' },
+    { step_id: 'stage_personal_share', title: 'Stage personal share', kind: 'browser_stage_only', status: 'pending', result: {
+      share_outcomes: [{
+        share_outcome_id: 'share_1',
+        group_name: 'USA Cattle',
+        group_url: 'https://www.facebook.com/groups/usa-cattle',
+        posting_identity: 'carlos_personal',
+        status: 'approved_for_attended_share',
+      }],
+    } },
   ],
 }
 
@@ -56,9 +65,10 @@ describe('page publish model', () => {
     expect(artifact.artifactType).toBe('facebook_page_publish_decision')
     expect(artifact.zip).toBe('31901')
     expect(artifact.stepNumber).toBe(2)
-    expect(artifact.stepCount).toBe(2)
+    expect(artifact.stepCount).toBe(3)
     expect(artifact.risk).toBe('live_external')
     expect(artifact.destination.label).toBe('Anymal OS Facebook Page')
+    expect(artifact.downstreamTarget.label).toBe('USA Cattle')
     expect(artifact.creative.src).toBe('https://example.com/creative.png')
     expect(artifact.copy).toContain('Columbus')
     expect(artifact.canPreview).toBe(true)

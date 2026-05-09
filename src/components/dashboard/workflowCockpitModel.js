@@ -14,6 +14,8 @@ export const ACTIVE_STAGING_STATUSES = new Set([
   'staging_in_progress',
 ])
 
+export const WRONG_DESTINATION_SHARE_STATUS = 'posted_to_personal_feed_not_target_group'
+
 export const LAST_WORKFLOW_STORAGE_KEY = 'anymal:last_workflow_cockpit_v1'
 
 export function normalizeZip(value) {
@@ -126,6 +128,86 @@ function mergeShareOutcomes(run, shareOutcomes = []) {
   }
 }
 
+export function targetShareSummary(run, shareOutcomes = []) {
+  const share = mergeShareOutcomes(run, shareOutcomes)
+  const rows = share.rows.filter(row => row?.share_outcome_id)
+  const preferred = (
+    rows.find(row => row.status === 'staged_for_operator_review')
+    || rows.find(row => ACTIVE_STAGING_STATUSES.has(row.status))
+    || rows.find(row => row.status === 'approved_for_attended_share')
+    || rows[0]
+    || null
+  )
+
+  return {
+    known: Boolean(preferred),
+    groupName: preferred?.group_name || preferred?.target_name || 'Target group unknown',
+    groupUrl: preferred?.group_url || '',
+    postingIdentity: preferred?.posting_identity || 'carlos_personal',
+    shareOutcomeId: preferred?.share_outcome_id || '',
+    status: preferred?.status || '',
+    row: preferred,
+  }
+}
+
+function latestBrowserTask(browserTasks = []) {
+  return (Array.isArray(browserTasks) ? browserTasks : [])
+    .slice()
+    .sort((a, b) => String(b?.updated_at || b?.created_at || '').localeCompare(String(a?.updated_at || a?.created_at || '')))[0] || null
+}
+
+export function runnerAvailabilityFromBrowserTasks(browserTasks = [], shareOutcomes = [], run = null) {
+  const share = mergeShareOutcomes(run, shareOutcomes)
+  if (share.rows.some(row => row.status === 'staged_for_operator_review')) {
+    return {
+      state: 'green',
+      label: 'Runner completed staging',
+      detail: 'A Facebook composer is staged for operator review.',
+      disableRequest: false,
+    }
+  }
+
+  const task = latestBrowserTask(browserTasks)
+  const status = String(task?.status || '').toLowerCase()
+  const failed = ['failed', 'error', 'cancelled', 'canceled', 'expired', 'blocked'].some(value => status.includes(value))
+  const active = ['running', 'claimed', 'in_progress', 'staging_in_progress'].some(value => status.includes(value))
+  const queued = ['queued', 'pending', 'staging_requested'].some(value => status.includes(value))
+
+  if (failed) {
+    return {
+      state: 'red',
+      label: 'Runner failure',
+      detail: task?.error || task?.status_reason || status || 'The latest browser task reported failure.',
+      disableRequest: true,
+    }
+  }
+
+  if (active || share.rows.some(row => row.status === 'staging_in_progress')) {
+    return {
+      state: 'green',
+      label: 'Runner active',
+      detail: task?.status || 'A staging request is active.',
+      disableRequest: false,
+    }
+  }
+
+  if (queued || share.rows.some(row => row.status === 'staging_requested')) {
+    return {
+      state: 'yellow',
+      label: 'Runner queued',
+      detail: task?.status || 'A staging request is queued.',
+      disableRequest: false,
+    }
+  }
+
+  return {
+    state: 'yellow',
+    label: 'Runner status unknown',
+    detail: task ? `Latest browser task: ${task.status || 'unknown'}` : 'No recent browser task is exposed.',
+    disableRequest: false,
+  }
+}
+
 function yesNoUnknown({ known, yes }) {
   if (!known) return 'unknown'
   return yes ? 'yes' : 'no'
@@ -145,7 +227,8 @@ export function buildEvidenceRows({ run, campaigns = [], shareOutcomes = [] }) {
   const inProgressCount = share.rows.filter(outcome => outcome.status === 'staging_in_progress').length
   const staged = stagedCount > 0
   const posted = hasShareRows && share.rows.some(outcome => (
-    POSTED_SHARE_STATUSES.has(outcome.status) || Boolean(outcome.facebook_share_url)
+    outcome.status !== WRONG_DESTINATION_SHARE_STATUS
+    && (POSTED_SHARE_STATUSES.has(outcome.status) || Boolean(outcome.facebook_share_url))
   ))
   const ledgerResult = stepResult(run, 'update_outcome_ledger')
   const ledgerStep = (run?.steps || []).find(step => step.step_id === 'update_outcome_ledger')
@@ -247,8 +330,10 @@ export function riskCopy(risk) {
   return copy[risk] || copy.draft_review
 }
 
-function clickPostTask(run, evidenceRows, shareOutcomes = []) {
+function clickPostTask(run, evidenceRows, shareOutcomes = [], browserTasks = []) {
   const share = mergeShareOutcomes(run, shareOutcomes)
+  const target = targetShareSummary(run, shareOutcomes)
+  const runner = runnerAvailabilityFromBrowserTasks(browserTasks, shareOutcomes, run)
   const hasStaged = evidenceRows.find(row => row.id === 'personal_share.staged')?.state === 'yes'
   const activeStaging = share.rows.find(outcome => (
     outcome.share_outcome_id && ACTIVE_STAGING_STATUSES.has(outcome.status)
@@ -270,6 +355,10 @@ function clickPostTask(run, evidenceRows, shareOutcomes = []) {
       shareOutcomeId: activeStaging.share_outcome_id,
       primaryLabel: 'Refresh staging status',
       disabledReason: '',
+      targetGroupName: target.groupName,
+      targetGroupUrl: target.groupUrl,
+      postingIdentity: target.postingIdentity,
+      runnerAvailability: runner,
       handoffSummary: `${activeStaging.group_name || activeStaging.share_outcome_id} is ${activeStaging.status}. Wait for the desktop runner to mark it staged_for_operator_review.`,
     }
   }
@@ -282,7 +371,11 @@ function clickPostTask(run, evidenceRows, shareOutcomes = []) {
       shareOutcomeId: requestable.share_outcome_id,
       handoffTargetName: requestable.group_name || requestable.share_outcome_id,
       primaryLabel: 'Request browser staging',
-      disabledReason: '',
+      disabledReason: runner.disableRequest ? runner.detail : '',
+      targetGroupName: target.groupName,
+      targetGroupUrl: target.groupUrl,
+      postingIdentity: target.postingIdentity,
+      runnerAvailability: runner,
       handoffSummary: `Prepared handoff for ${requestable.group_name || requestable.share_outcome_id}. Request staging before any Post review.`,
     }
   }
@@ -293,6 +386,12 @@ function clickPostTask(run, evidenceRows, shareOutcomes = []) {
     risk: hasStaged ? 'live_external' : 'staging',
     primaryLabel: hasStaged ? 'Approve after Post review' : 'Waiting for staged share',
     disabledReason: hasStaged ? '' : 'A share outcome must be staged before this gate can advance.',
+    targetGroupName: target.groupName,
+    targetGroupUrl: target.groupUrl,
+    postingIdentity: target.postingIdentity,
+    runnerAvailability: runner,
+    requiresDestinationConfirmation: hasStaged,
+    destinationConfirmLabel: `I confirmed the Facebook composer destination is ${target.groupName}, not my personal feed.`,
     handoffSummary: hasStaged && stagedShare
       ? `${stagedShare.group_name || stagedShare.share_outcome_id} is staged_for_operator_review. Review the browser composer before approving.`
       : '',
@@ -314,7 +413,7 @@ function disabledReasonForStep(step, evidenceRows) {
   return ''
 }
 
-export function buildCarlosTask(run, evidenceRows, shareOutcomes = []) {
+export function buildCarlosTask(run, evidenceRows, shareOutcomes = [], browserTasks = []) {
   const step = currentStep(run)
   if (!run) return null
   if (run.status === 'completed') {
@@ -350,7 +449,7 @@ export function buildCarlosTask(run, evidenceRows, shareOutcomes = []) {
       disabledReason: run.status !== 'running' ? 'Safe steps can run only while the workflow status is running.' : '',
     }
   } else if (step.step_id === 'click_post') {
-    action = clickPostTask(run, evidenceRows, shareOutcomes)
+    action = clickPostTask(run, evidenceRows, shareOutcomes, browserTasks)
   } else {
     action = {
       actionType: 'decision',
@@ -423,8 +522,9 @@ export function nextClickCopy(task) {
     return {
       will: [
         'Record Carlos approval for the Post review gate.',
+        task?.targetGroupName ? `Confirm the staged composer destination is ${task.targetGroupName}.` : '',
         'Let the backend continue to step 10 outcome ledger processing.',
-      ],
+      ].filter(Boolean),
       willNot: [
         'Click Post for Carlos.',
         'Open a browser session.',
@@ -458,10 +558,11 @@ export function nextClickCopy(task) {
   }
 }
 
-export function sourceFreshnessState({ lastLoadedAt, campaigns = [], shareOutcomes = [], run }) {
+export function sourceFreshnessState({ lastLoadedAt, campaigns = [], shareOutcomes = [], run, browserTasks = [] }) {
   const zip = normalizeZip(run?.linked_entities?.zip)
   const pageCampaign = facebookPageCampaign(campaigns, zip)
   const gate = pageCampaign?.freshness_gate || pageCampaign?.price_freshness || pageCampaign?.campaign_freshness || null
+  const runner = runnerAvailabilityFromBrowserTasks(browserTasks, shareOutcomes, run)
   return {
     zip,
     lastLoadedAt,
@@ -470,7 +571,7 @@ export function sourceFreshnessState({ lastLoadedAt, campaigns = [], shareOutcom
     runLoaded: Boolean(run),
     pageFreshnessLabel: gate?.label || gate?.decision || 'unknown',
     pageFreshnessSource: gate ? 'campaign freshness field' : 'not exposed',
-    browserTasksSource: 'not integrated in V1',
+    browserTasksSource: browserTasks.length ? `${runner.label}: ${browserTasks.length} row${browserTasks.length === 1 ? '' : 's'}` : runner.label,
     runDiscoverySource: 'exact run id required',
     historicalAccessSource: 'exact run id required',
   }
