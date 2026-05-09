@@ -184,6 +184,31 @@ function statusTone(status) {
   return '#8abf8a'
 }
 
+function formatPercent(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return 'unknown'
+  return `${Math.round(numeric * 100)}%`
+}
+
+function zipErrorMessage(errorDetail) {
+  if (!errorDetail) return ''
+  if (errorDetail.error === 'stale_price_data') {
+    const fresh = errorDetail.fresh_count ?? errorDetail.freshness_gate?.fresh_count ?? 'unknown'
+    const total = errorDetail.total_count ?? errorDetail.freshness_gate?.total_count ?? 'unknown'
+    const ratio = formatPercent(errorDetail.fresh_ratio ?? errorDetail.freshness_gate?.fresh_ratio)
+    const threshold = formatPercent(errorDetail.reject_threshold ?? errorDetail.freshness_gate?.reject_threshold)
+    return `Campaign generator rejected this ZIP: fresh ratio ${ratio} (${fresh}/${total}) is below the ${threshold} launch threshold. Pick another ZIP or wait for source refresh.`
+  }
+  if (errorDetail.error === 'insufficient_fresh_evidence') {
+    return `Campaign generator rejected this ZIP: ${errorDetail.blocked_reason || 'fresh price evidence is missing'}. Pick another ZIP or wait for source refresh.`
+  }
+  return errorDetail.message || errorDetail.error || JSON.stringify(errorDetail)
+}
+
+function isHardZipRejection(errorDetail) {
+  return errorDetail?.error === 'stale_price_data' || errorDetail?.error === 'insufficient_fresh_evidence'
+}
+
 function formatEntityList(entities) {
   return Object.entries(entities || {})
     .filter(([, value]) => value !== null && value !== undefined && value !== '')
@@ -391,6 +416,7 @@ function RunControls({
   activeGate,
   launchPackageCampaigns,
   zipLoading,
+  zipErrors,
   onGenerateCreative,
   onOpenDraftReview,
   onRunNextStep,
@@ -405,6 +431,7 @@ function RunControls({
   const isLoading = actionLoading === `run:${run?.run_id}` || actionLoading === `decision:${run?.run_id}`
   const gateEvidence = gateEvidenceState(run, activeGate, launchPackageCampaigns)
   const positiveDecisionDisabled = isLoading || !stepId || gateEvidence.blocked
+  const zipError = zipErrors?.[normalizeZip(run?.linked_entities?.zip)] || null
   const pageCampaign = facebookPageCampaign(launchPackageCampaigns, run?.linked_entities?.zip)
   const pagePublishHref = run?.run_id && pageCampaign?.campaign_id
     ? `/workflows/${encodeURIComponent(run.run_id)}/page-publish/${encodeURIComponent(pageCampaign.campaign_id)}`
@@ -436,6 +463,7 @@ function RunControls({
             campaigns={launchPackageCampaigns}
             zip={run?.linked_entities?.zip}
             zipLoading={zipLoading}
+            zipError={zipError}
             onGenerateCreative={onGenerateCreative}
             onOpenDraftReview={onOpenDraftReview}
             pagePublishHref={pagePublishHref}
@@ -447,6 +475,7 @@ function RunControls({
             campaigns={launchPackageCampaigns}
             zip={run?.linked_entities?.zip}
             zipLoading={zipLoading}
+            zipError={zipError}
             onGenerateCreative={onGenerateCreative}
             onOpenDraftReview={onOpenDraftReview}
           />
@@ -508,13 +537,15 @@ function RunControls({
   )
 }
 
-function LaunchPackageReview({ campaigns = [], zip, zipLoading = {}, onGenerateCreative, onOpenDraftReview }) {
+function LaunchPackageReview({ campaigns = [], zip, zipLoading = {}, zipError, onGenerateCreative, onOpenDraftReview }) {
   const rows = rowsForZip(campaigns, zip)
   const pageDraft = rows.find(campaign => campaign.channel === 'facebook_page')
   const creativeReady = campaignCreativeReady(pageDraft)
   const creativeUrl = pageDraft?.creative_metadata?.thumbnail_url || pageDraft?.creative_metadata?.image_url || pageDraft?.published_image_url || ''
   const loadingPhase = zipLoading?.[String(zip || '').padStart(5, '0')] || ''
   const creativeLoading = Boolean(loadingPhase)
+  const hardRejection = isHardZipRejection(zipError)
+  const zipErrorCopy = zipErrorMessage(zipError)
   return (
     <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', alignItems: 'start' }}>
@@ -534,6 +565,11 @@ function LaunchPackageReview({ campaigns = [], zip, zipLoading = {}, onGenerateC
           The backend generated the package, but the dashboard has not loaded the draft records yet. Refresh the dashboard before approving.
         </div>
       )}
+      {zipErrorCopy && (
+        <div role="alert" style={{ border: '1px solid #ff4444', borderRadius: '6px', background: '#260707', color: '#ffb3b3', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
+          {zipErrorCopy}
+        </div>
+      )}
       {pageDraft && !creativeReady && (
         <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', padding: '10px', display: 'grid', gap: '8px' }}>
           <div style={{ color: '#ffd54f', fontSize: '12px', fontWeight: 700 }}>Facebook Page creative is missing.</div>
@@ -541,7 +577,7 @@ function LaunchPackageReview({ campaigns = [], zip, zipLoading = {}, onGenerateC
             Generate and attach the creative here before approving the launch package. Approval stays blocked until the final creative is part of this review.
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button type="button" onClick={() => onGenerateCreative?.(zip)} disabled={creativeLoading || !onGenerateCreative} style={buttonStyle({ filled: true, disabled: creativeLoading || !onGenerateCreative })}>
+            <button type="button" onClick={() => onGenerateCreative?.(zip)} disabled={creativeLoading || hardRejection || !onGenerateCreative} style={buttonStyle({ filled: true, disabled: creativeLoading || hardRejection || !onGenerateCreative })}>
               {creativeLoading ? loadingPhase : 'Generate and attach creative'}
             </button>
             <button type="button" onClick={() => onOpenDraftReview?.(zip)} style={buttonStyle()}>
@@ -590,13 +626,15 @@ function LaunchPackageReview({ campaigns = [], zip, zipLoading = {}, onGenerateC
   )
 }
 
-function PageAnchorGateReview({ campaigns = [], zip, zipLoading = {}, onGenerateCreative, onOpenDraftReview, pagePublishHref = '' }) {
+function PageAnchorGateReview({ campaigns = [], zip, zipLoading = {}, zipError, onGenerateCreative, onOpenDraftReview, pagePublishHref = '' }) {
   const pageCampaign = facebookPageCampaign(campaigns, zip)
   const evidence = pageAnchorEvidence(pageCampaign)
   const copy = pageCampaign?.message || pageCampaign?.generated_copy || ''
   const creativeReady = campaignCreativeReady(pageCampaign)
   const loadingPhase = zipLoading?.[String(zip || '').padStart(5, '0')] || ''
   const creativeLoading = Boolean(loadingPhase)
+  const hardRejection = isHardZipRejection(zipError)
+  const zipErrorCopy = zipErrorMessage(zipError)
   return (
     <section style={{ border: '1px solid #1a3a2a', borderRadius: '6px', background: '#031808', padding: '12px', display: 'grid', gap: '10px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', alignItems: 'start' }}>
@@ -617,6 +655,11 @@ function PageAnchorGateReview({ campaigns = [], zip, zipLoading = {}, onGenerate
       <div style={{ color: '#8abf8a', fontSize: '12px', lineHeight: 1.45 }}>
         This gate means the Page post has already been reviewed and published from Draft Review. It cannot be approved from the agenda until the campaign has both a posted URL and a post ID.
       </div>
+      {zipErrorCopy && (
+        <div role="alert" style={{ border: '1px solid #ff4444', borderRadius: '6px', background: '#260707', color: '#ffb3b3', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
+          {zipErrorCopy}
+        </div>
+      )}
       {pageCampaign && !creativeReady && (
         <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', padding: '10px', display: 'grid', gap: '8px' }}>
           <div style={{ color: '#ffd54f', fontSize: '12px', fontWeight: 700 }}>Creative is required before this Page draft can become the Page anchor.</div>
@@ -624,7 +667,7 @@ function PageAnchorGateReview({ campaigns = [], zip, zipLoading = {}, onGenerate
             Generate and attach the ZIP creative here, then open Draft Review to inspect the final Facebook Page draft before publishing.
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button type="button" onClick={() => onGenerateCreative?.(zip)} disabled={creativeLoading} style={buttonStyle({ filled: true, disabled: creativeLoading })}>
+            <button type="button" onClick={() => onGenerateCreative?.(zip)} disabled={creativeLoading || hardRejection} style={buttonStyle({ filled: true, disabled: creativeLoading || hardRejection })}>
               {creativeLoading ? loadingPhase : 'Generate and attach creative'}
             </button>
             <button type="button" onClick={() => onOpenDraftReview?.(zip)} style={buttonStyle()}>
@@ -1081,6 +1124,7 @@ export default function TodayAgendaWorkspace({
   onRequestShareStaging,
   onRequestRelationshipGrowthStaging,
   zipLoading,
+  zipErrors = {},
   actionLoading,
   shareOutcomeActionLoading,
 }) {
@@ -1460,6 +1504,7 @@ export default function TodayAgendaWorkspace({
             activeGate={activeGate}
             launchPackageCampaigns={launchPackageCampaigns}
             zipLoading={zipLoading}
+            zipErrors={zipErrors}
             onGenerateCreative={onGenerateCreative}
             onOpenDraftReview={onOpenDraftReview}
             onRunNextStep={onRunNextStep}
