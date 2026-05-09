@@ -405,6 +405,10 @@ function RunControls({
   const isLoading = actionLoading === `run:${run?.run_id}` || actionLoading === `decision:${run?.run_id}`
   const gateEvidence = gateEvidenceState(run, activeGate, launchPackageCampaigns)
   const positiveDecisionDisabled = isLoading || !stepId || gateEvidence.blocked
+  const pageCampaign = facebookPageCampaign(launchPackageCampaigns, run?.linked_entities?.zip)
+  const pagePublishHref = run?.run_id && pageCampaign?.campaign_id
+    ? `/workflows/${encodeURIComponent(run.run_id)}/page-publish/${encodeURIComponent(pageCampaign.campaign_id)}`
+    : ''
 
   if (!run) return null
 
@@ -434,6 +438,7 @@ function RunControls({
             zipLoading={zipLoading}
             onGenerateCreative={onGenerateCreative}
             onOpenDraftReview={onOpenDraftReview}
+            pagePublishHref={pagePublishHref}
           />
         )}
 
@@ -585,7 +590,7 @@ function LaunchPackageReview({ campaigns = [], zip, zipLoading = {}, onGenerateC
   )
 }
 
-function PageAnchorGateReview({ campaigns = [], zip, zipLoading = {}, onGenerateCreative, onOpenDraftReview }) {
+function PageAnchorGateReview({ campaigns = [], zip, zipLoading = {}, onGenerateCreative, onOpenDraftReview, pagePublishHref = '' }) {
   const pageCampaign = facebookPageCampaign(campaigns, zip)
   const evidence = pageAnchorEvidence(pageCampaign)
   const copy = pageCampaign?.message || pageCampaign?.generated_copy || ''
@@ -632,9 +637,14 @@ function PageAnchorGateReview({ campaigns = [], zip, zipLoading = {}, onGenerate
         <div style={{ border: '1px solid #ffd54f', borderRadius: '6px', background: '#1f1a05', padding: '10px', display: 'grid', gap: '8px' }}>
           <div style={{ color: '#ffd54f', fontSize: '12px', fontWeight: 700 }}>Creative is ready. Carlos still needs to review and publish the Page draft.</div>
           <div style={{ color: '#ffe9a6', fontSize: '12px', lineHeight: 1.45 }}>
-            Open Draft Review, inspect the Facebook Page draft, and approve it only if you want the Page anchor published externally.
+            Use the focused Page publish surface to inspect the Facebook Page draft and publish only when the final preview looks right.
           </div>
-          <div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {pagePublishHref && (
+              <Link to={pagePublishHref} style={buttonStyle({ filled: true, tone: '#ff7a45' })}>
+                Open focused publish
+              </Link>
+            )}
             <button type="button" onClick={() => onOpenDraftReview?.(zip)} style={buttonStyle({ filled: true })}>
               Open Draft Review
             </button>
