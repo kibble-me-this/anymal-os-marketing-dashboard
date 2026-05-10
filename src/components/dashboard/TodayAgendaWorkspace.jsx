@@ -343,6 +343,15 @@ function personalActionIdFromRun(run) {
     || ''
 }
 
+function personalReplyBatchIdFromRun(run) {
+  return run?.linked_entities?.batch_id
+    || stepResult(run, 'prepare_v2_reply_batch_session')?.personal_engagement_v2_reply_batch_id
+    || stepResult(run, 'generate_v2_reply_drafts')?.personal_engagement_v2_reply_batch_id
+    || stepResult(run, 'carlos_approves_v2_reply_batch')?.batch_id
+    || stepResult(run, 'execute_v2_reply_batch_in_chrome')?.batch_id
+    || ''
+}
+
 function workflowHrefForRun(run) {
   if (!run?.run_id) return '/agenda#agenda'
   if (run.workflow_type === 'personal_account_engagement') {
@@ -352,6 +361,10 @@ function workflowHrefForRun(run) {
   if (run.workflow_type === 'personal_engagement_v2_action') {
     const actionId = personalActionIdFromRun(run)
     if (actionId) return `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement-v2/${encodeURIComponent(actionId)}`
+  }
+  if (run.workflow_type === 'personal_engagement_v2_reply_batch') {
+    const batchId = personalReplyBatchIdFromRun(run)
+    if (batchId) return `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement-v2-reply-batch/${encodeURIComponent(batchId)}`
   }
   return `/workflows/${encodeURIComponent(run.run_id)}`
 }
@@ -367,6 +380,10 @@ function workflowHrefForItem(item, run = null) {
   if (item?.workflow_type === 'personal_engagement_v2_action') {
     const actionId = item?.linked_entities?.action_id
     if (actionId) return `/workflows/${encodeURIComponent(runId)}/personal-engagement-v2/${encodeURIComponent(actionId)}`
+  }
+  if (item?.workflow_type === 'personal_engagement_v2_reply_batch') {
+    const batchId = item?.linked_entities?.batch_id
+    if (batchId) return `/workflows/${encodeURIComponent(runId)}/personal-engagement-v2-reply-batch/${encodeURIComponent(batchId)}`
   }
   return `/workflows/${encodeURIComponent(runId)}`
 }
