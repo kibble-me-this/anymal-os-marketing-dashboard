@@ -181,9 +181,15 @@ describe('PersonalEngagementV2ActionSurface', () => {
     expect(screen.getByRole('region', { name: 'Exact action' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Drafted text' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Safety scoring' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Next click will and will not' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Chrome runner' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Evidence' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Recovery actions' })).toBeInTheDocument()
     expect(screen.getByText(approvedText)).toBeInTheDocument()
     expect(screen.getByText('carlos:v1')).toBeInTheDocument()
+    expect(screen.getByText('Recommendation safe')).toBeInTheDocument()
+    expect(screen.getByText('82')).toBeInTheDocument()
+    expect(screen.getByText('original_native_content, operator_useful')).toBeInTheDocument()
   })
 
   it('keeps Execute approved comment disabled until all three confirmations are checked', async () => {
