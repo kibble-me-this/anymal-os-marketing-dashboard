@@ -9,6 +9,7 @@ import WorkflowRunCockpit from './pages/WorkflowRunCockpit'
 import PagePublishSurface from './pages/PagePublishSurface'
 import PersonalEngagementSurface from './pages/PersonalEngagementSurface'
 import PersonalEngagementV2ActionSurface from './pages/PersonalEngagementV2ActionSurface'
+import PersonalEngagementV2ReplyBatchSurface from './pages/PersonalEngagementV2ReplyBatchSurface'
 
 const NAV_STYLE = {
   fontFamily: 'IBM Plex Sans, monospace',
@@ -84,6 +85,7 @@ export default function App() {
             <Route path="/workflows/:runId/page-publish/:campaignId" element={<PagePublishSurface />} />
             <Route path="/workflows/:runId/personal-engagement/:actionId" element={<PersonalEngagementSurface />} />
             <Route path="/workflows/:runId/personal-engagement-v2/:actionId" element={<PersonalEngagementV2ActionSurface />} />
+            <Route path="/workflows/:runId/personal-engagement-v2-reply-batch/:batchId" element={<PersonalEngagementV2ReplyBatchSurface />} />
             <Route path="/brief" element={<ResearchBrief />} />
             <Route path="/pipeline" element={<PipelineControl />} />
             <Route path="/admin/moderation" element={<AdminModeration />} />
