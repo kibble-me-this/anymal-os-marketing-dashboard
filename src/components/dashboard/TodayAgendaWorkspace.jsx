@@ -336,6 +336,10 @@ function personalActionIdFromRun(run) {
     || stepResult(run, 'prepare_personal_engagement_action')?.action_id
     || stepResult(run, 'carlos_approves_personal_action')?.action_id
     || stepResult(run, 'execute_personal_action_in_chrome')?.action_id
+    || stepResult(run, 'prepare_v2_action_candidate')?.personal_engagement_v2_action_id
+    || stepResult(run, 'generate_v2_candidate_text')?.personal_engagement_v2_action_id
+    || stepResult(run, 'carlos_approves_v2_action')?.action_id
+    || stepResult(run, 'execute_v2_action_in_chrome')?.action_id
     || ''
 }
 
@@ -344,6 +348,10 @@ function workflowHrefForRun(run) {
   if (run.workflow_type === 'personal_account_engagement') {
     const actionId = personalActionIdFromRun(run)
     if (actionId) return `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement/${encodeURIComponent(actionId)}`
+  }
+  if (run.workflow_type === 'personal_engagement_v2_action') {
+    const actionId = personalActionIdFromRun(run)
+    if (actionId) return `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement-v2/${encodeURIComponent(actionId)}`
   }
   return `/workflows/${encodeURIComponent(run.run_id)}`
 }
@@ -355,6 +363,10 @@ function workflowHrefForItem(item, run = null) {
   if (item?.workflow_type === 'personal_account_engagement') {
     const actionId = item?.linked_entities?.action_id
     if (actionId) return `/workflows/${encodeURIComponent(runId)}/personal-engagement/${encodeURIComponent(actionId)}`
+  }
+  if (item?.workflow_type === 'personal_engagement_v2_action') {
+    const actionId = item?.linked_entities?.action_id
+    if (actionId) return `/workflows/${encodeURIComponent(runId)}/personal-engagement-v2/${encodeURIComponent(actionId)}`
   }
   return `/workflows/${encodeURIComponent(runId)}`
 }

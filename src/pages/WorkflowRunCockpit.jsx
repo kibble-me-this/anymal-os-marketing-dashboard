@@ -283,9 +283,11 @@ export default function WorkflowRunCockpit() {
   const zip = sourceState?.zip || normalizeZip(run?.linked_entities?.zip)
   const unsupported = run && run.workflow_type !== 'zip_price_activation'
   const personalActionId = run?.linked_entities?.action_id || ''
-  const personalEngagementHref = run?.workflow_type === 'personal_account_engagement' && personalActionId
+  const personalEngagementHref = personalActionId && run?.workflow_type === 'personal_account_engagement'
     ? `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement/${encodeURIComponent(personalActionId)}`
-    : ''
+    : personalActionId && run?.workflow_type === 'personal_engagement_v2_action'
+      ? `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement-v2/${encodeURIComponent(personalActionId)}`
+      : ''
 
   return (
     <div style={{ maxWidth: '1180px', margin: '0 auto', display: 'grid', gap: '14px' }}>
