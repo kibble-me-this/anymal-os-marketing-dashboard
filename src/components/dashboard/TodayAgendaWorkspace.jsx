@@ -331,6 +331,34 @@ function stepResult(run, stepId) {
   return (run?.steps || []).find(step => step.step_id === stepId)?.result || null
 }
 
+function personalActionIdFromRun(run) {
+  return run?.linked_entities?.action_id
+    || stepResult(run, 'prepare_personal_engagement_action')?.action_id
+    || stepResult(run, 'carlos_approves_personal_action')?.action_id
+    || stepResult(run, 'execute_personal_action_in_chrome')?.action_id
+    || ''
+}
+
+function workflowHrefForRun(run) {
+  if (!run?.run_id) return '/agenda#agenda'
+  if (run.workflow_type === 'personal_account_engagement') {
+    const actionId = personalActionIdFromRun(run)
+    if (actionId) return `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement/${encodeURIComponent(actionId)}`
+  }
+  return `/workflows/${encodeURIComponent(run.run_id)}`
+}
+
+function workflowHrefForItem(item, run = null) {
+  if (run) return workflowHrefForRun(run)
+  const runId = item?.active_run_id
+  if (!runId) return '/agenda#agenda'
+  if (item?.workflow_type === 'personal_account_engagement') {
+    const actionId = item?.linked_entities?.action_id
+    if (actionId) return `/workflows/${encodeURIComponent(runId)}/personal-engagement/${encodeURIComponent(actionId)}`
+  }
+  return `/workflows/${encodeURIComponent(runId)}`
+}
+
 function targetShareForRun(run) {
   const stageResult = stepResult(run, 'stage_personal_share')
   const outcomes = Array.isArray(stageResult?.share_outcomes) ? stageResult.share_outcomes : []
@@ -1116,8 +1144,8 @@ function ActiveRunSummary({ run, activeGate, onOpen }) {
           <div style={{ color: '#ffe9a6', fontSize: '12px', lineHeight: 1.4, marginTop: '5px' }}>{activeGate?.message || 'Open the run to inspect the next decision.'}</div>
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <Link to={`/workflows/${run.run_id}`} style={{ ...buttonStyle({ filled: true, tone: '#00e676' }), textDecoration: 'none' }}>
-            Open cockpit
+          <Link to={workflowHrefForRun(run)} style={{ ...buttonStyle({ filled: true, tone: '#00e676' }), textDecoration: 'none' }}>
+            {run.workflow_type === 'personal_account_engagement' ? 'Open personal engagement' : 'Open cockpit'}
           </Link>
           <button type="button" onClick={onOpen} style={buttonStyle({ filled: true, tone: '#ffd54f' })}>
             Review gate
@@ -1483,8 +1511,8 @@ export default function TodayAgendaWorkspace({
                   </div>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                     {selectedItem.active_run_id && (
-                      <Link to={`/workflows/${selectedItem.active_run_id}`} style={{ ...buttonStyle({ tone: '#00e676' }), textDecoration: 'none' }}>
-                        Open cockpit
+                      <Link to={workflowHrefForItem(selectedItem, activeRun)} style={{ ...buttonStyle({ tone: '#00e676' }), textDecoration: 'none' }}>
+                        {selectedItem.workflow_type === 'personal_account_engagement' ? 'Open personal engagement' : 'Open cockpit'}
                       </Link>
                     )}
                     {selectedItem.active_run_id && !activeRun && (

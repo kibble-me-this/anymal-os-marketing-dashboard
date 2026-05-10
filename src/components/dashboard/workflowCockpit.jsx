@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom'
+import { DestinationConfirmCheckbox, RunnerAvailabilityIndicator, StatusPill } from './workflowControls'
+import { buttonStyle } from './workflowControlStyles'
 import { nextClickCopy, riskCopy } from './workflowCockpitModel'
 
 const MONO_FONT = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
-const SANS_FONT = "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif"
 
 const PANEL = {
   border: '1px solid #1a3a2a',
@@ -10,46 +11,10 @@ const PANEL = {
   background: '#031808',
 }
 
-function buttonStyle({ tone = '#00e676', filled = false, disabled = false } = {}) {
-  return {
-    padding: '9px 12px',
-    borderRadius: '5px',
-    border: filled && !disabled ? 'none' : `1px solid ${tone}`,
-    background: filled && !disabled ? tone : 'transparent',
-    color: filled && !disabled ? '#021a0e' : tone,
-    fontSize: '10px',
-    letterSpacing: '0.07em',
-    textTransform: 'uppercase',
-    fontFamily: SANS_FONT,
-    fontWeight: 700,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    opacity: disabled ? 0.55 : 1,
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: '34px',
-  }
-}
-
 function stateTone(state) {
   if (state === 'yes') return '#00e676'
   if (state === 'no') return '#ff7a45'
   return '#8abf8a'
-}
-
-function runnerTone(state) {
-  if (state === 'green') return '#00e676'
-  if (state === 'red') return '#ff4444'
-  return '#ffd54f'
-}
-
-function StatusPill({ children, tone = '#00e676' }) {
-  return (
-    <span style={{ border: `1px solid ${tone}`, color: tone, borderRadius: '999px', padding: '3px 8px', fontSize: '10px', fontFamily: SANS_FONT, whiteSpace: 'nowrap' }}>
-      {children}
-    </span>
-  )
 }
 
 export function WorkflowBreadcrumbs({ zip, stepNumber }) {
@@ -127,7 +92,6 @@ export function CarlosTaskCard({
     || (needsDestinationConfirmation && !destinationConfirmed)
   )
   const runner = task?.runnerAvailability || null
-  const runnerColor = runnerTone(runner?.state)
   return (
     <section style={{ ...PANEL, padding: '16px', display: 'grid', gap: '14px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'start', flexWrap: 'wrap' }}>
@@ -158,15 +122,7 @@ export function CarlosTaskCard({
         </section>
       )}
 
-      {runner && (
-        <div role="status" style={{ border: `1px solid ${runnerColor}`, borderRadius: '5px', color: runnerColor, background: runner.state === 'red' ? '#260707' : '#021a0e', padding: '10px', display: 'flex', gap: '8px', alignItems: 'start', fontSize: '12px', lineHeight: 1.45 }}>
-          <span aria-hidden="true" style={{ width: '9px', height: '9px', borderRadius: '999px', background: runnerColor, display: 'inline-block', marginTop: '4px', flex: '0 0 auto' }} />
-          <span>
-            <strong>{runner.label}</strong>
-            {runner.detail ? `: ${runner.detail}` : ''}
-          </span>
-        </div>
-      )}
+      {runner && <RunnerAvailabilityIndicator runner={runner} />}
 
       {task?.disabledReason && (
         <div role="status" style={{ border: '1px solid #ffd54f', borderRadius: '5px', color: '#ffe58a', background: '#1f1a05', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
@@ -175,15 +131,11 @@ export function CarlosTaskCard({
       )}
 
       {needsDestinationConfirmation && (
-        <label style={{ display: 'flex', gap: '8px', alignItems: 'start', color: '#ffe58a', background: '#1f1a05', border: '1px solid #ffd54f', borderRadius: '5px', padding: '10px', fontSize: '12px', lineHeight: 1.45 }}>
-          <input
-            type="checkbox"
-            checked={destinationConfirmed}
-            onChange={event => onDestinationConfirmedChange?.(event.target.checked)}
-            style={{ marginTop: '2px' }}
-          />
-          <span>{task.destinationConfirmLabel}</span>
-        </label>
+        <DestinationConfirmCheckbox
+          checked={destinationConfirmed}
+          onChange={onDestinationConfirmedChange}
+          label={task.destinationConfirmLabel}
+        />
       )}
 
       <label style={{ display: 'grid', gap: '6px' }}>
