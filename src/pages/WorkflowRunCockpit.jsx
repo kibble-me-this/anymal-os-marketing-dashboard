@@ -282,6 +282,10 @@ export default function WorkflowRunCockpit() {
 
   const zip = sourceState?.zip || normalizeZip(run?.linked_entities?.zip)
   const unsupported = run && run.workflow_type !== 'zip_price_activation'
+  const personalActionId = run?.linked_entities?.action_id || ''
+  const personalEngagementHref = run?.workflow_type === 'personal_account_engagement' && personalActionId
+    ? `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement/${encodeURIComponent(personalActionId)}`
+    : ''
 
   return (
     <div style={{ maxWidth: '1180px', margin: '0 auto', display: 'grid', gap: '14px' }}>
@@ -302,6 +306,9 @@ export default function WorkflowRunCockpit() {
           <div style={{ fontSize: '13px', lineHeight: 1.45 }}>
             This run is {run.workflow_type || 'unknown'}. Relationship growth and other workflow routes are deferred to V2.
           </div>
+          {personalEngagementHref && (
+            <Link to={personalEngagementHref} style={{ color: '#00e676', fontSize: '12px' }}>Open personal engagement surface</Link>
+          )}
           <Link to="/agenda#agenda" style={{ color: '#00e676', fontSize: '12px' }}>Return to Agenda</Link>
         </section>
       )}
