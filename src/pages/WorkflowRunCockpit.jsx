@@ -284,13 +284,16 @@ export default function WorkflowRunCockpit() {
   const unsupported = run && run.workflow_type !== 'zip_price_activation'
   const personalActionId = run?.linked_entities?.action_id || ''
   const personalReplyBatchId = run?.linked_entities?.batch_id || ''
+  const personalFeedSessionId = run?.linked_entities?.session_id || ''
   const personalEngagementHref = personalActionId && run?.workflow_type === 'personal_account_engagement'
     ? `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement/${encodeURIComponent(personalActionId)}`
     : personalActionId && run?.workflow_type === 'personal_engagement_v2_action'
       ? `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement-v2/${encodeURIComponent(personalActionId)}`
       : personalReplyBatchId && run?.workflow_type === 'personal_engagement_v2_reply_batch'
         ? `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement-v2-reply-batch/${encodeURIComponent(personalReplyBatchId)}`
-        : ''
+        : personalFeedSessionId && run?.workflow_type === 'personal_engagement_v2_feed_session'
+          ? `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement-v2-feed-session/${encodeURIComponent(personalFeedSessionId)}`
+          : ''
 
   return (
     <div style={{ maxWidth: '1180px', margin: '0 auto', display: 'grid', gap: '14px' }}>

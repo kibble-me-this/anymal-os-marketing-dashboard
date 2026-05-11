@@ -25,6 +25,7 @@ const WORKFLOW_LABELS = {
   city_launch_amplification: 'City amplification',
   native_video_review: 'Native video',
   pending_share_follow_up: 'Share follow-up',
+  personal_engagement_v2_feed_session: 'V2.3 feed session',
 }
 
 function readLastWorkflowShortcut() {
@@ -352,6 +353,14 @@ function personalReplyBatchIdFromRun(run) {
     || ''
 }
 
+function personalFeedSessionIdFromRun(run) {
+  return run?.linked_entities?.session_id
+    || stepResult(run, 'prepare_v2_feed_session')?.personal_engagement_v2_feed_session_id
+    || stepResult(run, 'prepare_v2_feed_session')?.session_id
+    || stepResult(run, 'traverse_v2_feed_in_chrome')?.session_id
+    || ''
+}
+
 function workflowHrefForRun(run) {
   if (!run?.run_id) return '/agenda#agenda'
   if (run.workflow_type === 'personal_account_engagement') {
@@ -365,6 +374,10 @@ function workflowHrefForRun(run) {
   if (run.workflow_type === 'personal_engagement_v2_reply_batch') {
     const batchId = personalReplyBatchIdFromRun(run)
     if (batchId) return `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement-v2-reply-batch/${encodeURIComponent(batchId)}`
+  }
+  if (run.workflow_type === 'personal_engagement_v2_feed_session') {
+    const sessionId = personalFeedSessionIdFromRun(run)
+    if (sessionId) return `/workflows/${encodeURIComponent(run.run_id)}/personal-engagement-v2-feed-session/${encodeURIComponent(sessionId)}`
   }
   return `/workflows/${encodeURIComponent(run.run_id)}`
 }
@@ -384,6 +397,10 @@ function workflowHrefForItem(item, run = null) {
   if (item?.workflow_type === 'personal_engagement_v2_reply_batch') {
     const batchId = item?.linked_entities?.batch_id
     if (batchId) return `/workflows/${encodeURIComponent(runId)}/personal-engagement-v2-reply-batch/${encodeURIComponent(batchId)}`
+  }
+  if (item?.workflow_type === 'personal_engagement_v2_feed_session') {
+    const sessionId = item?.linked_entities?.session_id
+    if (sessionId) return `/workflows/${encodeURIComponent(runId)}/personal-engagement-v2-feed-session/${encodeURIComponent(sessionId)}`
   }
   return `/workflows/${encodeURIComponent(runId)}`
 }
