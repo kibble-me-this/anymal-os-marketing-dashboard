@@ -39,6 +39,18 @@ const baseRun = {
   ],
 }
 
+const pendingTraversalRun = {
+  ...baseRun,
+  status: 'running',
+  current_step_id: 'traverse_v2_feed_in_chrome',
+  steps: [
+    { step_id: 'prepare_v2_feed_session', title: 'Prepare V2.3 feed session', kind: 'backend_safe', status: 'completed', result: { session_id: 'workflowrun_v23_test', target_feed_url: targetFeedUrl, session_status: 'pending_traversal' } },
+    { step_id: 'traverse_v2_feed_in_chrome', title: 'Traverse feed', kind: 'chrome_stage_only', status: 'pending', result: null },
+    { step_id: 'review_v2_feed_candidates', title: 'Review V2.3 staged feed candidates', kind: 'carlos_final_action', status: 'pending', result: null },
+    { step_id: 'feed_v2_learning_loop', title: 'Feed V2 learning loop', kind: 'backend_safe', status: 'pending', result: null },
+  ],
+}
+
 function candidate(id, overrides = {}) {
   return {
     candidate_id: id,
@@ -58,7 +70,7 @@ function candidate(id, overrides = {}) {
   }
 }
 
-function candidateResponse(candidates = [candidate('candidate_1'), candidate('candidate_2')]) {
+function candidateResponse(candidates = [candidate('candidate_1'), candidate('candidate_2')], sessionOverrides = {}) {
   return {
     session: {
       session_id: 'workflowrun_v23_test',
@@ -71,6 +83,7 @@ function candidateResponse(candidates = [candidate('candidate_1'), candidate('ca
       posts_scrolled_past: 4,
       identity_name: 'Carlos Herrera',
       profile_user_data_dir: 'Dedicated PersonalEngagement profile',
+      ...sessionOverrides,
     },
     candidates,
     count: candidates.length,
@@ -106,6 +119,9 @@ function mockFetch({ run = baseRun, candidates = candidateResponse(), browserTas
   const fetchMock = vi.fn(async (url, options = {}) => {
     const target = String(url)
     const method = options.method || 'GET'
+    if (target.includes('/personal-engagement-v2-feed-session/request')) {
+      return jsonResponse({ status: 'ok', requested: true })
+    }
     if (target.includes('/spawn-action')) {
       const body = JSON.parse(options.body)
       const actionId = `personalengagementv2_${target.split('/candidates/')[1].split('/')[0]}_comment`
@@ -125,7 +141,7 @@ function mockFetch({ run = baseRun, candidates = candidateResponse(), browserTas
       })
     }
     if (target.includes('/dismiss')) return jsonResponse({ candidate_status: 'rejected' })
-    if (target.includes('/marketing-agenda/runs/workflowrun_v23_test')) return jsonResponse(run)
+    if (target.includes('/marketing-agenda/runs/workflowrun_v23_test') && method === 'GET') return jsonResponse(run)
     if (target.includes('/feed-sessions/workflowrun_v23_test/candidates') && method === 'GET') return jsonResponse(candidates)
     if (target.includes('/browser-tasks')) return jsonResponse({ browser_tasks: browserTasks })
     throw new Error(`Unexpected fetch: ${target} ${method}`)
@@ -209,5 +225,113 @@ describe('PersonalEngagementV2FeedSessionSurface', () => {
     expect(await screen.findByText('already engaged today')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Comment' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Reply to commenters' })).toBeDisabled()
+  })
+
+  it('shows the request traversal button when the session is pending and no task exists', async () => {
+    mockFetch({
+      run: pendingTraversalRun,
+      candidates: candidateResponse([], { session_status: 'pending_traversal', candidate_count: 0, candidates_staged: 0 }),
+      browserTasks: [],
+    })
+
+    renderSurface()
+
+    expect(await screen.findByRole('button', { name: 'Request V2.3 traversal' })).toBeInTheDocument()
+  })
+
+  it('hides the request traversal button once the session is no longer pending', async () => {
+    mockFetch({
+      run: pendingTraversalRun,
+      candidates: candidateResponse([], { session_status: 'traversal_blocked', refusal_code: 'phase_v23_feed_unavailable' }),
+      browserTasks: [],
+    })
+
+    renderSurface()
+
+    await screen.findByText('Traversal blocked')
+    expect(screen.queryByRole('button', { name: 'Request V2.3 traversal' })).not.toBeInTheDocument()
+  })
+
+  it('hides the request traversal button when a traversal task already exists', async () => {
+    mockFetch({
+      run: pendingTraversalRun,
+      candidates: candidateResponse([], { session_status: 'pending_traversal', candidate_count: 0, candidates_staged: 0 }),
+      browserTasks: [{ browser_task_id: 'browsertask_existing', status: 'requested', updated_at: '2026-05-12T20:00:00Z' }],
+    })
+
+    renderSurface()
+
+    await screen.findByText(/latest_task: browsertask_existing/)
+    expect(screen.queryByRole('button', { name: 'Request V2.3 traversal' })).not.toBeInTheDocument()
+  })
+
+  it('requests traversal, posts operator notes, and hides the button after refresh', async () => {
+    const user = userEvent.setup()
+    let requested = false
+    const fetchMock = vi.fn(async (url, options = {}) => {
+      const target = String(url)
+      const method = options.method || 'GET'
+      if (target.includes('/personal-engagement-v2-feed-session/request')) {
+        requested = true
+        return jsonResponse({ status: 'ok', requested: true })
+      }
+      if (target.includes('/marketing-agenda/runs/workflowrun_v23_test') && method === 'GET') {
+        return jsonResponse(pendingTraversalRun)
+      }
+      if (target.includes('/feed-sessions/workflowrun_v23_test/candidates') && method === 'GET') {
+        return jsonResponse(candidateResponse([], {
+          session_status: requested ? 'traversal_requested' : 'pending_traversal',
+          candidate_count: 0,
+          candidates_staged: 0,
+        }))
+      }
+      if (target.includes('/browser-tasks')) {
+        return jsonResponse({
+          browser_tasks: requested ? [{ browser_task_id: 'browsertask_requested', status: 'requested', updated_at: '2026-05-12T20:00:00Z' }] : [],
+        })
+      }
+      throw new Error(`Unexpected fetch: ${target} ${method}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderSurface()
+
+    await screen.findByRole('button', { name: 'Request V2.3 traversal' })
+    await user.type(screen.getByPlaceholderText('Optional note for this V2.3 feed session'), 'Queue this traversal.')
+    await user.click(screen.getByRole('button', { name: 'Request V2.3 traversal' }))
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(call => String(call[0]).includes('/personal-engagement-v2-feed-session/request'))).toBe(true))
+    const requestCall = fetchMock.mock.calls.find(call => String(call[0]).includes('/personal-engagement-v2-feed-session/request'))
+    expect(JSON.parse(requestCall[1].body).operator_notes).toBe('Queue this traversal.')
+    expect(await screen.findByText('V2.3 traversal requested.')).toBeInTheDocument()
+    await screen.findByText(/latest_task: browsertask_requested/)
+    expect(screen.queryByRole('button', { name: 'Request V2.3 traversal' })).not.toBeInTheDocument()
+  })
+
+  it('surfaces request traversal API errors and re-enables the button', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockFetch({
+      run: pendingTraversalRun,
+      candidates: candidateResponse([], { session_status: 'pending_traversal', candidate_count: 0, candidates_staged: 0 }),
+      browserTasks: [],
+    })
+    fetchMock.mockImplementation(async (url, options = {}) => {
+      const target = String(url)
+      const method = options.method || 'GET'
+      if (target.includes('/personal-engagement-v2-feed-session/request')) {
+        return jsonResponse({ detail: 'runner unavailable' }, 409)
+      }
+      if (target.includes('/marketing-agenda/runs/workflowrun_v23_test') && method === 'GET') return jsonResponse(pendingTraversalRun)
+      if (target.includes('/feed-sessions/workflowrun_v23_test/candidates') && method === 'GET') return jsonResponse(candidateResponse([], { session_status: 'pending_traversal', candidate_count: 0, candidates_staged: 0 }))
+      if (target.includes('/browser-tasks')) return jsonResponse({ browser_tasks: [] })
+      throw new Error(`Unexpected fetch: ${target} ${method}`)
+    })
+
+    renderSurface()
+
+    await user.click(await screen.findByRole('button', { name: 'Request V2.3 traversal' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('runner unavailable')
+    expect(screen.getByRole('button', { name: 'Request V2.3 traversal' })).toBeEnabled()
   })
 })
