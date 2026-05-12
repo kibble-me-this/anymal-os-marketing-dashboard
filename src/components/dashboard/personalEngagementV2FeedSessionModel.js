@@ -4,6 +4,8 @@ const EXPECTED_IDENTITY = 'Carlos Herrera'
 
 const ACTIVE_TASK_STATUSES = new Set(['requested', 'picked_up', 'browser_opened', 'in_progress'])
 const RED_TASK_STATUSES = new Set(['failed', 'cancelled', 'blocked_by_stop_condition'])
+const BLOCKED_SESSION_STATUSES = new Set(['blocked', 'traversal_blocked'])
+const FAILED_SESSION_STATUSES = new Set(['traversal_failed'])
 const STAGED_STATUSES = new Set(['staged'])
 const APPROVED_STATUSES = new Set(['approved', 'executed'])
 
@@ -99,8 +101,11 @@ export function runnerAvailabilityForPersonalV23(browserTasks, run, session) {
   if (session?.sessionStatus === 'staged_for_operator_review') {
     return { state: 'green', label: 'Completed', detail: 'The V2.3 feed traversal candidates are staged.' }
   }
-  if (session?.sessionStatus === 'blocked') {
+  if (BLOCKED_SESSION_STATUSES.has(session?.sessionStatus)) {
     return { state: 'red', label: 'Traversal blocked', detail: session.refusalCode || 'The traversal returned a structured refusal.' }
+  }
+  if (FAILED_SESSION_STATUSES.has(session?.sessionStatus)) {
+    return { state: 'red', label: 'Traversal failed', detail: session.browserObservation || 'The traversal failed without a structured refusal.' }
   }
   if (RED_TASK_STATUSES.has(status)) {
     return { state: 'red', label: 'Runner blocked', detail: latestTask.error_if_any || `Latest task is ${status}.` }
@@ -118,11 +123,12 @@ export function runnerAvailabilityForPersonalV23(browserTasks, run, session) {
 }
 
 export function personalV23EvidenceRows(session, candidates) {
+  const terminalFailure = BLOCKED_SESSION_STATUSES.has(session.sessionStatus) || FAILED_SESSION_STATUSES.has(session.sessionStatus)
   const rows = [
     {
       id: 'session-status',
       label: 'Session status',
-      state: session.sessionStatus === 'staged_for_operator_review' ? 'yes' : 'unknown',
+      state: session.sessionStatus === 'staged_for_operator_review' ? 'yes' : terminalFailure ? 'no' : 'unknown',
       value: session.sessionStatus || 'unknown',
       source: 'personal_engagement_v2_feed_sessions',
     },
@@ -175,6 +181,7 @@ export function buildPersonalEngagementV23View({ run, candidateResponse = {}, br
   const routeMatches = !routeSessionId || routeSessionId === session.sessionId
   const stagedCandidates = candidates.filter(candidate => candidate.candidate_status === 'staged')
   const actionableCandidates = stagedCandidates.filter(candidate => !candidate.cooldown.active)
+  const latestBrowserTask = latestPersonalV23BrowserTask(browserTasks)
 
   return {
     runId: run?.run_id || 'unknown',
@@ -191,12 +198,13 @@ export function buildPersonalEngagementV23View({ run, candidateResponse = {}, br
     cooldownCount: candidates.filter(candidate => candidate.cooldown.active).length,
     spawnedCount: candidates.filter(candidate => candidate.isSpawned).length,
     expectedIdentity: EXPECTED_IDENTITY,
-    latestBrowserTask: latestPersonalV23BrowserTask(browserTasks),
+    latestBrowserTask,
     runnerAvailability: runnerAvailabilityForPersonalV23(browserTasks, run, session),
     evidenceRows: personalV23EvidenceRows(session, candidates),
     lastLoadedAt,
     routeMatches,
     isReviewable: routeMatches && run?.current_step_id === REVIEW_STEP_ID,
     hasCandidates: candidates.length > 0,
+    canRequestTraversal: routeMatches && session.sessionStatus === 'pending_traversal' && !latestBrowserTask,
   }
 }

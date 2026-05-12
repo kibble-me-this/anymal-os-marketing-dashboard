@@ -57,6 +57,18 @@ async function fetchFeedCandidates(sessionId) {
   return res.json()
 }
 
+async function requestTraversal(runId, notes) {
+  const res = await fetch(`${MARKETING_API}/marketing-agenda/runs/${encodeURIComponent(runId)}/personal-engagement-v2-feed-session/request`, {
+    method: 'POST',
+    headers: adminHeaders,
+    body: JSON.stringify({
+      operator_notes: notes || '',
+    }),
+  })
+  if (!res.ok) throw new Error(await readErrorDetail(res))
+  return res.json()
+}
+
 async function spawnCandidateAction(sessionId, candidateId, spawnKind, notes) {
   const res = await fetch(`${MARKETING_API}/marketing-agenda/personal-engagement-v2/feed-sessions/${encodeURIComponent(sessionId)}/candidates/${encodeURIComponent(candidateId)}/spawn-action`, {
     method: 'POST',
@@ -161,6 +173,7 @@ export default function PersonalEngagementV2FeedSessionSurface() {
   const [browserTasks, setBrowserTasks] = useState([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
+  const [requestLoading, setRequestLoading] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [notes, setNotes] = useState('')
@@ -198,6 +211,7 @@ export default function PersonalEngagementV2FeedSessionSurface() {
   const unsupported = run && run.workflow_type !== 'personal_engagement_v2_feed_session'
   const eligibleBulk = artifact.actionableCandidates.filter(candidate => candidate.canComment)
   const topN = Math.max(1, Math.min(Number(bulkTopN) || 1, eligibleBulk.length || 1))
+  const requestTraversalDisabled = requestLoading || loading || actionLoading || unsupported || !HAS_MARKETING_ADMIN_KEY || !artifact.routeMatches
 
   const handleSpawn = async (candidate, spawnKind) => {
     setActionLoading(true)
@@ -231,6 +245,21 @@ export default function PersonalEngagementV2FeedSessionSurface() {
       setError(err.message || 'Failed to dismiss candidate.')
     } finally {
       setActionLoading(false)
+    }
+  }
+
+  const handleRequestTraversal = async () => {
+    setRequestLoading(true)
+    setError('')
+    setNotice('')
+    try {
+      await requestTraversal(runId, notes)
+      setNotice('V2.3 traversal requested.')
+      await load()
+    } catch (err) {
+      setError(err.message || 'Failed to request V2.3 traversal.')
+    } finally {
+      setRequestLoading(false)
     }
   }
 
@@ -391,7 +420,12 @@ export default function PersonalEngagementV2FeedSessionSurface() {
             <div style={{ color: '#4a7a5a', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Chrome runner availability</div>
             <h2 style={{ color: '#e0ffe0', margin: '5px 0 0 0', fontSize: '18px', letterSpacing: 0 }}>Dedicated profile must be available</h2>
           </div>
-          <button type="button" onClick={load} disabled={loading || actionLoading} style={buttonStyle({ tone: '#4da3ff', disabled: loading || actionLoading })}>Refresh runner status</button>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {artifact.canRequestTraversal ? (
+              <button type="button" onClick={handleRequestTraversal} disabled={requestTraversalDisabled} style={buttonStyle({ filled: true, tone: '#00e676', disabled: requestTraversalDisabled })}>Request V2.3 traversal</button>
+            ) : null}
+            <button type="button" onClick={load} disabled={loading || actionLoading || requestLoading} style={buttonStyle({ tone: '#4da3ff', disabled: loading || actionLoading || requestLoading })}>Refresh runner status</button>
+          </div>
         </div>
         <RunnerAvailabilityIndicator runner={artifact.runnerAvailability} />
         {artifact.latestBrowserTask ? (
